@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API URLs ---
-PRODUCT_API_URL_POWER = "https://www.simcompanies.com/api/v3/market/0/13/" # Example: Power
+PRODUCT_API_URL_POWER = "https://www.simcompanies.com/api/v3/market/0/1/" # Example: Power
 BUY_API_URL = "https://www.simcompanies.com/api/v2/market-order/take/"
 CASH_API_URL = "https://www.simcompanies.com/api/v2/companies/me/cashflow/recent/"
 
