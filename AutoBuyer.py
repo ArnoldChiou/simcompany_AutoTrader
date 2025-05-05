@@ -27,7 +27,7 @@ class AutoBuyer:
     # --- Modified __init__ to accept target_products dictionary ---
     def __init__(self, target_products, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Removed product_api_url, target_quality
         self.TARGET_PRODUCTS = target_products # Store the dictionary
-        self.MAX_BUY_QUANTITY = max_buy_quantity if max_buy_quantity is not None else float('inf') # Use infinity if None
+        self.MAX_BUY_QUANTITY = max_buy_quantity # Store the dictionary instead of a single value
         self.MARKET_HEADERS = market_headers
         self.session = requests.Session() # Keep requests session for market data fetching
         self.session.headers.update(self.MARKET_HEADERS)
@@ -75,7 +75,7 @@ class AutoBuyer:
         print(f"價格: ${price:.3f}")
         print(f"可用數量: {quantity_available}")
 
-        buy_quantity = min(quantity_available, self.MAX_BUY_QUANTITY)
+        buy_quantity = min(quantity_available, self.MAX_BUY_QUANTITY.get(product_name, float('inf'))) # Use product-specific max quantity
 
         if buy_quantity <= 0:
             print("錯誤：計算出的購買數量為 0 或更少，取消購買。")
@@ -194,10 +194,11 @@ class AutoBuyer:
 
                         if lowest_price < buy_threshold_price:
                             print(f"***> 條件滿足 ({product_name})! 最低價 ${lowest_price:.3f} < 閾值 ${buy_threshold_price:.3f}")
-                            print("正在初始化 Selenium WebDriver...")
-                            service = ChromeService(ChromeDriverManager().install())
-                            driver = webdriver.Chrome(service=service, options=options)
-                            self.driver = driver
+                            if self.driver is None:
+                                print("正在初始化 Selenium WebDriver...")
+                                service = ChromeService(ChromeDriverManager().install())
+                                driver = webdriver.Chrome(service=service, options=options)
+                                self.driver = driver
 
                             resource_id = self._extract_resource_id(product_info['url'])
                             if resource_id is None:

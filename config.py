@@ -24,7 +24,12 @@ TARGET_PRODUCTS = {
 }
 
 # --- Buying Parameters ---
-MAX_BUY_QUANTITY = 1000 # Set to None for no limit
+# Change MAX_BUY_QUANTITY to a dictionary for individual product settings
+MAX_BUY_QUANTITY = {
+    "Power": 2000,  # Example: Set max quantity for Power
+    "Transport": 1000,  # Example: Set max quantity for Transport
+    # Add more products here with their respective max quantities
+}
 
 # --- Request Parameters ---
 MARKET_HEADERS = {

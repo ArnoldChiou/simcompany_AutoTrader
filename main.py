@@ -17,7 +17,7 @@ def run_auto_buyer():
     try:
         buyer = AutoBuyer(
             target_products=TARGET_PRODUCTS, # Pass the dictionary
-            max_buy_quantity=MAX_BUY_QUANTITY,
+            max_buy_quantity=MAX_BUY_QUANTITY, # Pass the dictionary instead of a single value
             market_headers=MARKET_HEADERS,
             headers=None, # AutoBuyer uses MARKET_HEADERS internally for requests
             cookies=None, # AutoBuyer handles cookies via Selenium profile
