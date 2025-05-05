@@ -12,7 +12,6 @@ PRODUCT_API_URL_TRANSPORT = "https://www.simcompanies.com/api/v3/market/0/13/"
 # Add more product URLs as needed
 # PRODUCT_API_URL_WATER = "https://www.simcompanies.com/api/v3/market/0/2/"
 
-BUY_API_URL = "https://www.simcompanies.com/api/v2/market-order/take/"
 CASH_API_URL = "https://www.simcompanies.com/api/v2/companies/me/cashflow/recent/"
 
 # --- Target Products ---

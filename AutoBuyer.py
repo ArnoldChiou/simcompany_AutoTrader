@@ -25,7 +25,7 @@ from selenium.common.exceptions import WebDriverException
 
 class AutoBuyer:
     # --- Modified __init__ to accept target_products dictionary ---
-    def __init__(self, target_products, buy_api_url, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Removed product_api_url, target_quality
+    def __init__(self, target_products, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Removed product_api_url, target_quality
         self.TARGET_PRODUCTS = target_products # Store the dictionary
         self.MAX_BUY_QUANTITY = max_buy_quantity if max_buy_quantity is not None else float('inf') # Use infinity if None
         self.MARKET_HEADERS = market_headers
