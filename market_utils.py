@@ -33,7 +33,7 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
                 quantity = int(quantity)
             except (ValueError, TypeError):
                 continue
-            if quality == target_quality and price > 0 and quantity > 0:
+            if quality >= target_quality and price > 0 and quantity > 0:
                 if return_order_detail and order_id is not None:
                     filtered.append({'id': order_id, 'price': price, 'quantity': quantity})
                 else:
