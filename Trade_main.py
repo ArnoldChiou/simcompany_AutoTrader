@@ -1,10 +1,7 @@
 import requests
 import time
-import traceback
-import json
 # Import shared configurations
 from config import (
-    PRODUCT_API_URL, TARGET_QUALITY, MARKET_HEADERS as HEADERS, COOKIES,
     BUY_THRESHOLD_PERCENTAGE, DEFAULT_CHECK_INTERVAL_SECONDS,
     MARKET_REQUEST_TIMEOUT as REQUEST_TIMEOUT
 )

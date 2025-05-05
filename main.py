@@ -2,13 +2,6 @@
 from AutoBuyer import AutoBuyer
 from Trade_main import TradeMonitor
 import traceback
-import time
-
-# --- Selenium Imports ---
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.common.exceptions import WebDriverException
 
 # Import shared configurations from config.py
 from config import (

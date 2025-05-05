@@ -5,11 +5,10 @@ import json
 from urllib.parse import urlparse
 # Import shared configurations
 from config import (
-    PRODUCT_API_URL, TARGET_QUALITY, MAX_BUY_QUANTITY,
     MARKET_HEADERS, COOKIES, CASH_API_URL,
     BUY_THRESHOLD_PERCENTAGE, DEFAULT_CHECK_INTERVAL_SECONDS,
     PURCHASE_WAIT_MULTIPLIER, MARKET_REQUEST_TIMEOUT as REQUEST_TIMEOUT,
-    BUY_REQUEST_TIMEOUT, MONEY_REQUEST_TIMEOUT
+    MONEY_REQUEST_TIMEOUT
 )
 from market_utils import get_market_data
 

@@ -34,7 +34,7 @@ COOKIES = {
 if not COOKIES.get('sessionid') or not COOKIES.get('csrftoken'):
     print("錯誤：請在 config.py 中填入有效的 COOKIES (sessionid, csrftoken)。")
 
-BUY_THRESHOLD_PERCENTAGE = 0.95
+BUY_THRESHOLD_PERCENTAGE = 0.96
 DEFAULT_CHECK_INTERVAL_SECONDS = 300
 PURCHASE_WAIT_MULTIPLIER = 1.5
 
