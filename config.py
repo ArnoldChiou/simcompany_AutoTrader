@@ -7,13 +7,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API URLs ---
-PRODUCT_API_URL_POWER = "https://www.simcompanies.com/api/v3/market/0/1/" # Example: Power
+PRODUCT_API_URL_POWER = "https://www.simcompanies.com/api/v3/market/0/1/"
+PRODUCT_API_URL_TRANSPORT = "https://www.simcompanies.com/api/v3/market/0/13/"
+# Add more product URLs as needed
+# PRODUCT_API_URL_WATER = "https://www.simcompanies.com/api/v3/market/0/2/"
+
 BUY_API_URL = "https://www.simcompanies.com/api/v2/market-order/take/"
 CASH_API_URL = "https://www.simcompanies.com/api/v2/companies/me/cashflow/recent/"
 
-# --- Target Product ---
-PRODUCT_API_URL = PRODUCT_API_URL_POWER # Default to Power
-TARGET_QUALITY = 0
+# --- Target Products ---
+# Use a dictionary to store multiple product URLs and their qualities
+TARGET_PRODUCTS = {
+    "Power": {"url": PRODUCT_API_URL_POWER, "quality": 0},
+    "Transport": {"url": PRODUCT_API_URL_TRANSPORT, "quality": 0},
+    # Add more products here, e.g.:
+    # "Water": {"url": PRODUCT_API_URL_WATER, "quality": 1},
+}
 
 # --- Buying Parameters ---
 MAX_BUY_QUANTITY = 1000 # Set to None for no limit

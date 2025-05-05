@@ -5,42 +5,39 @@ import traceback
 
 # Import shared configurations from config.py
 from config import (
-    PRODUCT_API_URL, TARGET_QUALITY, BUY_API_URL, MAX_BUY_QUANTITY,
-    MARKET_HEADERS,
+    TARGET_PRODUCTS, BUY_API_URL, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
+    MARKET_HEADERS, COOKIES # Import COOKIES
 )
 
 def run_auto_buyer():
-    print("\n啟動 AutoBuyer 自動購買模式 (僅在觸發條件時才啟動 Selenium)...")
-    print(f"目標商品 API: {PRODUCT_API_URL}")
-    print(f"目標品質: Q{TARGET_QUALITY}")
+    print("\n啟動 AutoBuyer 自動購買模式 (監控所有目標產品)...")
+    print(f"目標產品: {list(TARGET_PRODUCTS.keys())}") # Show all target product names
     print(f"最大購買數量: {MAX_BUY_QUANTITY if MAX_BUY_QUANTITY is not None else '無限制'}")
     print("-------------------------------------")
     try:
-        # 將 Selenium 相關邏輯與主循環交由 AutoBuyer.main_loop 處理
         buyer = AutoBuyer(
-            product_api_url=PRODUCT_API_URL,
-            target_quality=TARGET_QUALITY,
+            target_products=TARGET_PRODUCTS, # Pass the dictionary
             buy_api_url=BUY_API_URL,
             max_buy_quantity=MAX_BUY_QUANTITY,
             market_headers=MARKET_HEADERS,
-            headers=None,
-            cookies=None,
+            headers=None, # AutoBuyer uses MARKET_HEADERS internally for requests
+            cookies=None, # AutoBuyer handles cookies via Selenium profile
             driver=None
         )
-        buyer.main_loop()  # 直接呼叫 AutoBuyer 的主循環，內部自動處理 Selenium 啟動/關閉
+        buyer.main_loop()
     except KeyboardInterrupt:
         print("\n使用者中斷自動購買模式，程式結束。")
+    except Exception as e:
+        print(f"AutoBuyer 執行時發生未預期的錯誤: {e}")
+        traceback.print_exc()
 
 def run_trade_monitor():
-    print("\n啟動 TradeMonitor 市場監控模式...")
-    print(f"目標商品 API: {PRODUCT_API_URL}")
-    print(f"目標品質: Q{TARGET_QUALITY}")
+    print("\n啟動 TradeMonitor 市場監控模式 (監控所有目標產品)...")
+    print(f"目標產品: {list(TARGET_PRODUCTS.keys())}") # Show all target product names
     print("-------------------------------------")
     try:
-        from config import COOKIES
         monitor = TradeMonitor(
-            product_api_url=PRODUCT_API_URL,
-            target_quality=TARGET_QUALITY,
+            target_products=TARGET_PRODUCTS, # Pass the dictionary
             headers=MARKET_HEADERS,
             cookies=COOKIES
         )

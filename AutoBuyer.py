@@ -5,10 +5,10 @@ import json
 from urllib.parse import urlparse
 # Import shared configurations
 from config import (
-    MARKET_HEADERS, COOKIES, CASH_API_URL,
+    MARKET_HEADERS, COOKIES, CASH_API_URL, TARGET_PRODUCTS, # Import TARGET_PRODUCTS
     BUY_THRESHOLD_PERCENTAGE, DEFAULT_CHECK_INTERVAL_SECONDS,
     PURCHASE_WAIT_MULTIPLIER, MARKET_REQUEST_TIMEOUT as REQUEST_TIMEOUT,
-    MONEY_REQUEST_TIMEOUT
+    MONEY_REQUEST_TIMEOUT, MAX_BUY_QUANTITY # Import MAX_BUY_QUANTITY
 )
 from market_utils import get_market_data
 
@@ -24,21 +24,14 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import WebDriverException
 
 class AutoBuyer:
-    # --- Modified __init__ to accept WebDriver ---
-    def __init__(self, product_api_url, target_quality, buy_api_url, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Added driver parameter
-        self.PRODUCT_API_URL = product_api_url
-        self.TARGET_QUALITY = target_quality
+    # --- Modified __init__ to accept target_products dictionary ---
+    def __init__(self, target_products, buy_api_url, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Removed product_api_url, target_quality
+        self.TARGET_PRODUCTS = target_products # Store the dictionary
         self.MAX_BUY_QUANTITY = max_buy_quantity if max_buy_quantity is not None else float('inf') # Use infinity if None
         self.MARKET_HEADERS = market_headers
         self.session = requests.Session() # Keep requests session for market data fetching
         self.session.headers.update(self.MARKET_HEADERS)
-        self.RESOURCE_ID = self._extract_resource_id(product_api_url)
-        if self.RESOURCE_ID is None:
-            print(f"錯誤：無法從 URL {product_api_url} 解析資源 ID。")
-            raise ValueError("無效的產品 API URL，無法解析資源 ID。")
         self.driver = driver # This will be None initially, set in main_loop
-        self.MARKET_PAGE_URL = f"https://www.simcompanies.com/market/resource/{self.RESOURCE_ID}/" # Adjust this URL structure if needed!
-        print(f"將使用 Selenium 在此頁面購買: {self.MARKET_PAGE_URL}")
 
     def _extract_resource_id(self, url):
         """從產品 API URL 解析資源 ID"""
@@ -50,24 +43,34 @@ class AutoBuyer:
             print(f"解析資源 ID 時出錯 ({url}): {e}")
         return None
 
-    def get_market_data(self):
+    # --- Modified get_market_data to accept product details ---
+    def get_market_data(self, product_name, product_info):
         temp_session = requests.Session()
         temp_session.headers.update(self.MARKET_HEADERS)
+        print(f"--- 開始處理 {product_name} (Q{product_info['quality']}) 市場數據 ---")
         return get_market_data(
             temp_session,
-            self.PRODUCT_API_URL,
-            self.TARGET_QUALITY,
+            product_info['url'], # Use URL from product_info
+            product_info['quality'], # Use quality from product_info
             timeout=REQUEST_TIMEOUT,
             return_order_detail=True
         )
 
-    def trigger_buy_action(self, order_id, price, quantity_available, quality):
+    # --- Modified trigger_buy_action to accept product details ---
+    def trigger_buy_action(self, product_name, product_info, order_id, price, quantity_available):
         if not self.driver:
             print("XXX Selenium 購買失敗：WebDriver 實例無效。 XXX")
             return False
 
-        print(f"===========觸發 Selenium 購買條件===========")
-        print(f"準備使用 Selenium 購買 Q{quality} 商品 (資源 ID: {self.RESOURCE_ID})")
+        resource_id = self._extract_resource_id(product_info['url'])
+        if resource_id is None:
+            print(f"XXX Selenium 購買失敗：無法從 {product_info['url']} 解析 {product_name} 的資源 ID。 XXX")
+            return False
+        market_page_url = f"https://www.simcompanies.com/market/resource/{resource_id}/"
+        target_quality = product_info['quality'] # Get quality for logging/logic
+
+        print(f"===========觸發 Selenium 購買條件 ({product_name}) ===========")
+        print(f"準備使用 Selenium 購買 {product_name} (Q{target_quality}) 商品 (資源 ID: {resource_id})")
         print(f"訂單 ID: {order_id} (注意：Selenium 可能不直接使用 ID，而是根據價格/位置)")
         print(f"價格: ${price:.3f}")
         print(f"可用數量: {quantity_available}")
@@ -81,9 +84,9 @@ class AutoBuyer:
         print(f"嘗試購買數量: {buy_quantity}")
 
         try:
-            if self.driver.current_url != self.MARKET_PAGE_URL:
-                print(f"警告：目前不在目標市場頁面，嘗試導航至: {self.MARKET_PAGE_URL}")
-                self.driver.get(self.MARKET_PAGE_URL)
+            if self.driver.current_url != market_page_url:
+                print(f"警告：目前不在目標市場頁面 ({product_name})，嘗試導航至: {market_page_url}")
+                self.driver.get(market_page_url)
                 print("等待數量輸入框可見且可點擊...")
                 WebDriverWait(self.driver, 20).until(
                     EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[name="quantity"]'))
@@ -131,12 +134,12 @@ class AutoBuyer:
             try:
                 print("購買按鈕已點擊，等待短暫時間...")
                 time.sleep(3)
-                print(">>> Selenium 購買操作已執行 (未檢測到立即錯誤) <<<")
+                print(f">>> Selenium 購買操作 ({product_name}) 已執行 (未檢測到立即錯誤) <<<")
 
                 try:
                     with open('successful_trade.txt', 'a', encoding='utf-8') as f:
                         import datetime
-                        f.write(f"{datetime.datetime.now().isoformat()} | 資源ID:{self.RESOURCE_ID} | 訂單ID:{order_id} | 價格:{price} | 數量:{buy_quantity} | 品質:{quality}\n")
+                        f.write(f"{datetime.datetime.now().isoformat()} | 商品:{product_name} | 資源ID:{resource_id} | 訂單ID:{order_id} | 價格:{price} | 數量:{buy_quantity} | 品質:{target_quality}\n") # Added product_name
                 except Exception as log_err:
                     print(f"[Log] 寫入 successful_trade 檔案失敗: {log_err}")
                 print(f"===================================")
@@ -146,19 +149,19 @@ class AutoBuyer:
                 try:
                     error_element_xpath = "//div[contains(@class, 'error-message') or contains(@class, 'alert-danger') or contains(@class, 'alert-warning')]"
                     error_message = self.driver.find_element(By.XPATH, error_element_xpath).text
-                    print(f"XXX Selenium 購買失敗：檢測到錯誤/警告訊息: {error_message} XXX")
+                    print(f"XXX Selenium 購買失敗 ({product_name})：檢測到錯誤/警告訊息: {error_message} XXX")
                 except NoSuchElementException:
-                    print("XXX Selenium 購買超時：未檢測到成功或錯誤標誌。 XXX")
+                    print(f"XXX Selenium 購買超時 ({product_name})：未檢測到成功或錯誤標誌。 XXX")
                 print(f"===================================")
                 return False
 
         except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e:
-            print(f"XXX Selenium 購買失敗：尋找元素或操作時出錯: {type(e).__name__} XXX")
+            print(f"XXX Selenium 購買失敗 ({product_name})：尋找元素或操作時出錯: {type(e).__name__} XXX")
             print(f"錯誤訊息: {e}")
             print(f"===================================")
             return False
         except Exception as e:
-            print(f"XXX Selenium 購買失敗：執行購買時發生不可預期的錯誤:")
+            print(f"XXX Selenium 購買失敗 ({product_name})：執行購買時發生不可預期的錯誤:")
             traceback.print_exc()
             print(f"===================================")
             return False
@@ -201,109 +204,123 @@ class AutoBuyer:
     def main_loop(self):
         while True:
             purchase_attempted_in_cycle = False
-            print("\n" + "=" * 10 + f" 開始新一輪檢查 (目標 Q{self.TARGET_QUALITY}) " + "=" * 10)
+            print("\n" + "=" * 15 + " 開始新一輪檢查 (所有目標產品) " + "=" * 15)
 
-            market_data = self.get_market_data()
+            # --- Iterate through each product in TARGET_PRODUCTS ---
+            for product_name, product_info in self.TARGET_PRODUCTS.items():
+                print(f"\n--- 檢查產品: {product_name} (Q{product_info['quality']}) ---")
 
-            if market_data and 'lowest_order' in market_data and 'second_lowest_price' in market_data:
-                lowest_order = market_data['lowest_order']
-                lowest_price = lowest_order['price']
-                second_lowest_price = market_data['second_lowest_price']
+                market_data = self.get_market_data(product_name, product_info) # Pass product details
 
-                buy_threshold_price = second_lowest_price * BUY_THRESHOLD_PERCENTAGE
-                print(f"計算閾值: 次低價 ${second_lowest_price:.3f} 的 {BUY_THRESHOLD_PERCENTAGE*100:.1f}% = ${buy_threshold_price:.3f}")
+                if market_data and 'lowest_order' in market_data and 'second_lowest_price' in market_data:
+                    lowest_order = market_data['lowest_order']
+                    lowest_price = lowest_order['price']
+                    second_lowest_price = market_data['second_lowest_price']
 
-                if lowest_price < buy_threshold_price:
-                    print(f"***> 條件滿足! 最低價 ${lowest_price:.3f} < 閾值 ${buy_threshold_price:.3f}")
+                    buy_threshold_price = second_lowest_price * BUY_THRESHOLD_PERCENTAGE
+                    print(f"計算閾值 ({product_name}): 次低價 ${second_lowest_price:.3f} 的 {BUY_THRESHOLD_PERCENTAGE*100:.1f}% = ${buy_threshold_price:.3f}")
 
-                    options = webdriver.ChromeOptions()
-                    user_data_dir = r"C:\Users\Arnold\AppData\Local\Google\Chrome\simauto2"
-                    profile_dir = "Default"
-                    options.add_argument(f"user-data-dir={user_data_dir}")
-                    options.add_argument(f"--profile-directory={profile_dir}")
-                    options.add_experimental_option("excludeSwitches", ["enable-logging"])
+                    if lowest_price < buy_threshold_price:
+                        print(f"***> 條件滿足 ({product_name})! 最低價 ${lowest_price:.3f} < 閾值 ${buy_threshold_price:.3f}")
 
-                    driver = None
-                    try:
-                        print("正在初始化 Selenium WebDriver...")
-                        service = ChromeService(ChromeDriverManager().install())
-                        driver = webdriver.Chrome(service=service, options=options)
-                        self.driver = driver
+                        options = webdriver.ChromeOptions()
+                        user_data_dir = r"C:\Users\Arnold\AppData\Local\Google\Chrome\simauto2"
+                        profile_dir = "Default"
+                        options.add_argument(f"user-data-dir={user_data_dir}")
+                        options.add_argument(f"--profile-directory={profile_dir}")
+                        options.add_experimental_option("excludeSwitches", ["enable-logging"])
 
-                        print(f"導航至市場頁面進行登入檢查: {self.MARKET_PAGE_URL}")
-                        self.driver.get(self.MARKET_PAGE_URL)
-                        login_confirmed = False
+                        driver = None
                         try:
-                            login_check_element_selector = 'input[name="quantity"]'
-                            print(f"等待登入標誌元素 ({login_check_element_selector}) 可見且可點擊...")
-                            WebDriverWait(self.driver, 15).until(
-                                EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector))
-                            )
-                            print("登入狀態正常。")
-                            login_confirmed = True
-                        except TimeoutException:
-                            print("\n" + "*"*20)
-                            print("警告：未在預期時間內找到登入標誌元素。")
-                            print(">>> 您可能需要手動登入 SimCompanies <<<")
-                            print("請在已開啟的 Chrome 瀏覽器視窗中，輸入您的帳號和密碼進行登入。")
-                            input(">>> 完成登入後，請回到這裡按 Enter 鍵繼續 <<<")
-                            print("*"*20 + "\n")
-                            print("嘗試重新整理頁面並再次檢查登入狀態...")
-                            self.driver.refresh()
+                            print(f"正在初始化 Selenium WebDriver (針對 {product_name})...")
+                            service = ChromeService(ChromeDriverManager().install())
+                            driver = webdriver.Chrome(service=service, options=options)
+                            self.driver = driver # Assign driver to the instance
+
+                            resource_id = self._extract_resource_id(product_info['url'])
+                            if resource_id is None:
+                                print(f"XXX 無法為 {product_name} 啟動購買，因無法解析資源 ID。跳過此產品。 XXX")
+                                continue # Skip to the next product
+                            market_page_url = f"https://www.simcompanies.com/market/resource/{resource_id}/"
+
+                            print(f"導航至市場頁面進行登入檢查 ({product_name}): {market_page_url}")
+                            self.driver.get(market_page_url)
+                            login_confirmed = False
                             try:
-                                WebDriverWait(self.driver, 10).until(
+                                login_check_element_selector = 'input[name="quantity"]'
+                                print(f"等待登入標誌元素 ({login_check_element_selector}) 可見且可點擊...")
+                                WebDriverWait(self.driver, 15).until(
                                     EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector))
                                 )
-                                print("重新整理後確認登入成功。")
+                                print("登入狀態正常。")
                                 login_confirmed = True
                             except TimeoutException:
-                                print("XXX 警告：重新整理後仍無法確認登入狀態。後續購買操作可能失敗。 XXX")
+                                print("\n" + "*"*20)
+                                print("警告：未在預期時間內找到登入標誌元素。")
+                                print(">>> 您可能需要手動登入 SimCompanies <<<")
+                                print("請在已開啟的 Chrome 瀏覽器視窗中，輸入您的帳號和密碼進行登入。")
+                                input(">>> 完成登入後，請回到這裡按 Enter 鍵繼續 <<<")
+                                print("*"*20 + "\n")
+                                print("嘗試重新整理頁面並再次檢查登入狀態...")
+                                self.driver.refresh()
+                                try:
+                                    WebDriverWait(self.driver, 10).until(
+                                        EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector))
+                                    )
+                                    print("重新整理後確認登入成功。")
+                                    login_confirmed = True
+                                except TimeoutException:
+                                    print("XXX 警告：重新整理後仍無法確認登入狀態。後續購買操作可能失敗。 XXX")
 
-                        if login_confirmed:
-                            success = self.trigger_buy_action(
-                                order_id=lowest_order['id'],
-                                price=lowest_price,
-                                quantity_available=lowest_order['quantity'],
-                                quality=self.TARGET_QUALITY
-                            )
-                            purchase_attempted_in_cycle = True
-                            if success:
-                                print("Selenium 購買操作成功完成。")
+                            if login_confirmed:
+                                success = self.trigger_buy_action( # Pass product details
+                                    product_name=product_name,
+                                    product_info=product_info,
+                                    order_id=lowest_order['id'],
+                                    price=lowest_price,
+                                    quantity_available=lowest_order['quantity']
+                                )
+                                purchase_attempted_in_cycle = True # Mark that an attempt was made in this cycle
+                                if success:
+                                    print(f"Selenium 購買操作 ({product_name}) 成功完成。")
+                                else:
+                                    print(f"Selenium 購買操作 ({product_name}) 失敗或未執行。")
                             else:
-                                print("Selenium 購買操作失敗或未執行。")
-                        else:
-                            print("登入未確認，跳過本次購買嘗試。")
+                                print(f"登入未確認 ({product_name})，跳過本次購買嘗試。")
 
-                    except WebDriverException as e:
-                        print(f"XXX 啟動或操作 WebDriver 時發生錯誤: {type(e).__name__} XXX")
-                        print(f"錯誤訊息: {e}")
-                        if "user data directory is already in use" in str(e):
-                            print("---")
-                            print("錯誤提示：指定的 Chrome 設定檔目錄 (user-data-dir) 可能已被另一個 Chrome 實例使用。")
-                            print(f"路徑: {user_data_dir}")
-                            print("請關閉所有使用該設定檔的 Chrome 視窗後再試。")
-                            print("---")
-                        else:
+                        except WebDriverException as e:
+                            print(f"XXX 啟動或操作 WebDriver 時發生錯誤 ({product_name}): {type(e).__name__} XXX")
+                            print(f"錯誤訊息: {e}")
+                            if "user data directory is already in use" in str(e):
+                                print("---")
+                                print("錯誤提示：指定的 Chrome 設定檔目錄 (user-data-dir) 可能已被另一個 Chrome 實例使用。")
+                                print(f"路徑: {user_data_dir}")
+                                print("請關閉所有使用該設定檔的 Chrome 視窗後再試。")
+                                print("---")
+                            else:
+                                traceback.print_exc()
+                        except Exception as e:
+                            print(f"XXX 執行購買流程前發生未預期的錯誤 ({product_name}): {type(e).__name__} XXX")
                             traceback.print_exc()
-                    except Exception as e:
-                        print(f"XXX 執行購買流程前發生未預期的錯誤: {type(e).__name__} XXX")
-                        traceback.print_exc()
-                    finally:
-                        if self.driver:
-                            print("正在關閉 Selenium WebDriver...")
-                            self.driver.quit()
-                            print("WebDriver 已關閉。")
-                        self.driver = None
-                else:
-                    print(f"---> 條件未滿足。最低價 ${lowest_price:.3f} >= 閾值 ${buy_threshold_price:.3f}")
+                        finally:
+                            if self.driver:
+                                print(f"正在關閉 Selenium WebDriver (針對 {product_name})...")
+                                self.driver.quit()
+                                print("WebDriver 已關閉。")
+                            self.driver = None # Reset driver for the next potential purchase
 
-            elif market_data and 'lowest_order' in market_data:
-                lowest_order = market_data['lowest_order']
-                print(f"僅找到一個價格水平 (最低價訂單 ID:{lowest_order['id']}, ${lowest_order['price']:.3f}, {lowest_order['quantity']}件)，無法比較，跳過觸發檢查。")
-            else:
-                print("本次檢查未能獲取足夠的市場數據 (最低價訂單和次低價)，稍後重試。")
+                    else:
+                        print(f"---> 條件未滿足 ({product_name})。最低價 ${lowest_price:.3f} >= 閾值 ${buy_threshold_price:.3f}")
+
+                elif market_data and 'lowest_order' in market_data:
+                    lowest_order = market_data['lowest_order']
+                    print(f"僅找到一個價格水平 ({product_name}: 最低價訂單 ID:{lowest_order['id']}, ${lowest_order['price']:.3f}, {lowest_order['quantity']}件)，無法比較，跳過觸發檢查。")
+                else:
+                    print(f"本次檢查未能獲取足夠的市場數據 ({product_name}: 最低價訂單和次低價)，稍後重試。")
+
+                time.sleep(1) # Optional: Add a small delay between checking different products
 
             wait_modifier = PURCHASE_WAIT_MULTIPLIER if purchase_attempted_in_cycle else 1
             check_interval_seconds = DEFAULT_CHECK_INTERVAL_SECONDS * wait_modifier
-            print(f"檢查完成，休眠 {check_interval_seconds:.0f} 秒...")
+            print(f"\n所有產品檢查完成，休眠 {check_interval_seconds:.0f} 秒...")
             time.sleep(check_interval_seconds)
