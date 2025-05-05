@@ -38,7 +38,7 @@ class AutoBuyer:
             print(f"錯誤：無法從 URL {product_api_url} 解析資源 ID。")
             raise ValueError("無效的產品 API URL，無法解析資源 ID。")
         self.driver = driver # This will be None initially, set in main_loop
-        self.MARKET_PAGE_URL = f"https://www.simcompanies.com/market/resource/{self.RESOURCE_ID}" # Adjust this URL structure if needed!
+        self.MARKET_PAGE_URL = f"https://www.simcompanies.com/market/resource/{self.RESOURCE_ID}/" # Adjust this URL structure if needed!
         print(f"將使用 Selenium 在此頁面購買: {self.MARKET_PAGE_URL}")
 
     def _extract_resource_id(self, url):
