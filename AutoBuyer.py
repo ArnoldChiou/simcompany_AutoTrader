@@ -10,7 +10,7 @@ from config import (
     PURCHASE_WAIT_MULTIPLIER, MARKET_REQUEST_TIMEOUT as REQUEST_TIMEOUT,
     MONEY_REQUEST_TIMEOUT
 )
-from market_utils import get_market_data
+from market_utils import get_market_data, get_current_money
 
 # --- Selenium Imports ---
 from selenium.webdriver.remote.webdriver import WebDriver # For type hinting
@@ -165,41 +165,6 @@ class AutoBuyer:
             traceback.print_exc()
             print(f"===================================")
             return False
-
-    def get_current_money(self):
-        url = CASH_API_URL
-        try:
-            session_to_use = self.session if self.session.cookies else requests.Session()
-            session_to_use.headers.update(MARKET_HEADERS)
-            if not session_to_use.cookies and COOKIES.get('sessionid'):
-                session_to_use.cookies.update(COOKIES)
-
-            response = session_to_use.get(url, timeout=MONEY_REQUEST_TIMEOUT)
-            response.raise_for_status()
-            data = response.json()
-            money_data = data.get("cash", {}).get("value")
-            if money_data is not None:
-                print(f"取得帳戶現金 (API): {money_data}")
-                return money_data
-            else:
-                print("警告：API 回應中未找到預期的現金欄位。")
-                print(f"API Response sample: {str(data)[:200]}...")
-                return None
-        except requests.exceptions.Timeout:
-            print(f"取得帳戶現金時請求超時 ({url})。")
-            return None
-        except requests.exceptions.RequestException as e:
-            print(f"取得帳戶現金時發生請求錯誤 ({url}): {e}")
-            if e.response is not None:
-                print(f"Status Code: {e.response.status_code}")
-            return None
-        except json.JSONDecodeError:
-            print(f"取得帳戶現金時解析 JSON 失敗 ({url})。")
-            return None
-        except Exception as e:
-            print(f"取得帳戶現金時發生不可預期的錯誤:")
-            traceback.print_exc()
-            return None
 
     def main_loop(self):
         driver = None

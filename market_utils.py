@@ -72,3 +72,38 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
         print(f"錯誤：處理市場數據時發生不可預期的錯誤:")
         traceback.print_exc()
         return None
+
+def get_current_money(session, cookies, cash_api_url, market_headers, money_request_timeout):
+    url = cash_api_url
+    try:
+        session_to_use = session if session.cookies else requests.Session()
+        session_to_use.headers.update(market_headers)
+        if not session_to_use.cookies and cookies.get('sessionid'):
+            session_to_use.cookies.update(cookies)
+
+        response = session_to_use.get(url, timeout=money_request_timeout)
+        response.raise_for_status()
+        data = response.json()
+        money_data = data.get("cash", {}).get("value")
+        if money_data is not None:
+            print(f"取得帳戶現金 (API): {money_data}")
+            return money_data
+        else:
+            print("警告：API 回應中未找到預期的現金欄位。")
+            print(f"API Response sample: {str(data)[:200]}...")
+            return None
+    except requests.exceptions.Timeout:
+        print(f"取得帳戶現金時請求超時 ({url})。")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"取得帳戶現金時發生請求錯誤 ({url}): {e}")
+        if e.response is not None:
+            print(f"Status Code: {e.response.status_code}")
+        return None
+    except json.JSONDecodeError:
+        print(f"取得帳戶現金時解析 JSON 失敗 ({url})。")
+        return None
+    except Exception as e:
+        print(f"取得帳戶現金時發生不可預期的錯誤:")
+        traceback.print_exc()
+        return None
