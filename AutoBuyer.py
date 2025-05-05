@@ -135,7 +135,7 @@ class AutoBuyer:
                 print(">>> Selenium 購買操作已執行 (未檢測到立即錯誤) <<<")
 
                 try:
-                    with open('successful_trade', 'a', encoding='utf-8') as f:
+                    with open('successful_trade.txt', 'a', encoding='utf-8') as f:
                         import datetime
                         f.write(f"{datetime.datetime.now().isoformat()} | 資源ID:{self.RESOURCE_ID} | 訂單ID:{order_id} | 價格:{price} | 數量:{buy_quantity} | 品質:{quality}\n")
                 except Exception as log_err:
