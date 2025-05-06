@@ -84,7 +84,9 @@ def get_current_money(session, cookies, cash_api_url, market_headers, money_requ
         response = session_to_use.get(url, timeout=money_request_timeout)
         response.raise_for_status()
         data = response.json()
-        money_data = data.get("cash", {}).get("value")
+        
+        # Extract the 'money' field from the response
+        money_data = data.get("money")
         if money_data is not None:
             print(f"取得帳戶現金 (API): {money_data}")
             return money_data
@@ -98,10 +100,12 @@ def get_current_money(session, cookies, cash_api_url, market_headers, money_requ
     except requests.exceptions.RequestException as e:
         print(f"取得帳戶現金時發生請求錯誤 ({url}): {e}")
         if e.response is not None:
-            print(f"Status Code: {e.response.status_code}")
+            print(f"完整回應內容: {e.response.text[:500]}...")
         return None
-    except json.JSONDecodeError:
-        print(f"取得帳戶現金時解析 JSON 失敗 ({url})。")
+    except json.JSONDecodeError as e:
+        print(f"取得帳戶現金時解析 JSON 失敗 ({url}): {e}")
+        if response is not None:
+            print(f"回應內容: {response.text[:500]}...")
         return None
     except Exception as e:
         print(f"取得帳戶現金時發生不可預期的錯誤:")

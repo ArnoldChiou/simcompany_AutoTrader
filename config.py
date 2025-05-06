@@ -75,16 +75,15 @@ MARKET_HEADERS = {
     'Accept': 'application/json'
 }
 
-# Cookies (IMPORTANT: Update sessionid and csrftoken)
+# Cookies (IMPORTANT: Update sessionid)
 COOKIES = {
     'sessionid': os.getenv('SESSIONID', ''),
-    'csrftoken': os.getenv('CSRFTOKEN', ''),
 }
 
 # --- Logic Parameters ---
-if not COOKIES.get('sessionid') or not COOKIES.get('csrftoken'):
-    print("錯誤：請在 config.py 中填入有效的 COOKIES (sessionid, csrftoken)。")
-
+if not COOKIES.get('sessionid'):
+    print("錯誤：請創建.env檔並填入有效的 SESSIONID。 ex: SESSIONID=your_session_id")
+    print("如不知Session ID如何取得請參考README.md")
 BUY_THRESHOLD_PERCENTAGE = 0.96
 DEFAULT_CHECK_INTERVAL_SECONDS = 300
 PURCHASE_WAIT_MULTIPLIER = 1.5
@@ -95,6 +94,6 @@ BUY_REQUEST_TIMEOUT = 30
 MONEY_REQUEST_TIMEOUT = 15
 
 # --- Validation ---
-if not COOKIES.get('sessionid') or not COOKIES.get('csrftoken'):
-    print("錯誤：請在 config.py 中填入有效的 COOKIES (sessionid, csrftoken)。")
+if not COOKIES.get('sessionid'):
+    print("錯誤：請在 config.py 中填入有效的 COOKIES (sessionid)。")
 
