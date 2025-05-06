@@ -7,28 +7,47 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- API URLs ---
-PRODUCT_API_URL_POWER = "https://www.simcompanies.com/api/v3/market/0/1/"
-PRODUCT_API_URL_TRANSPORT = "https://www.simcompanies.com/api/v3/market/0/13/"
-# Add more product URLs as needed
-# PRODUCT_API_URL_WATER = "https://www.simcompanies.com/api/v3/market/0/2/"
-
 CASH_API_URL = "https://www.simcompanies.com/api/v2/companies/me/cashflow/recent/"
 
-# --- Target Products ---
-# Use a dictionary to store multiple product URLs and their qualities
+# --- Consolidated Product Configuration ---
+# Add new products by adding a new dictionary to this list
+PRODUCT_CONFIGS = [
+    {
+        "name": "Power",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/1/",
+        "quality": 0,
+        "max_buy_quantity": 100000
+    },
+    {
+        "name": "Transport",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/13/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "PlantResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
+        "quality": 0,
+        "max_buy_quantity": 10
+    },
+    # Example of adding a new product:
+    # {
+    #     "name": "Water",
+    #     "api_url": "https://www.simcompanies.com/api/v3/market/0/2/",
+    #     "quality": 1,
+    #     "max_buy_quantity": 5000
+    # },
+]
+
+# --- Dynamically Generated Dictionaries (for compatibility) ---
 TARGET_PRODUCTS = {
-    "Power": {"url": PRODUCT_API_URL_POWER, "quality": 0},
-    "Transport": {"url": PRODUCT_API_URL_TRANSPORT, "quality": 0},
-    # Add more products here, e.g.:
-    # "Water": {"url": PRODUCT_API_URL_WATER, "quality": 1},
+    config["name"]: {"url": config["api_url"], "quality": config["quality"]}
+    for config in PRODUCT_CONFIGS
 }
 
-# --- Buying Parameters ---
-# Change MAX_BUY_QUANTITY to a dictionary for individual product settings
 MAX_BUY_QUANTITY = {
-    "Power": 2000,  # Example: Set max quantity for Power
-    "Transport": 1000,  # Example: Set max quantity for Transport
-    # Add more products here with their respective max quantities
+    config["name"]: config["max_buy_quantity"]
+    for config in PRODUCT_CONFIGS
 }
 
 # --- Request Parameters ---
