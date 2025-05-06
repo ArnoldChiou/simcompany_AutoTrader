@@ -23,6 +23,11 @@ from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import WebDriverException
 
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 class AutoBuyer:
     # --- Modified __init__ to accept target_products dictionary ---
     def __init__(self, target_products, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Removed product_api_url, target_quality
@@ -170,7 +175,10 @@ class AutoBuyer:
         driver = None
         try:
             options = webdriver.ChromeOptions()
-            user_data_dir = r"C:\Users\Arnold\AppData\Local\Google\Chrome\simauto2"
+            user_data_dir = os.getenv("USER_DATA_DIR")
+            if not os.path.exists(user_data_dir):
+                raise FileNotFoundError(f"The specified user data directory does not exist: {user_data_dir}")
+            print(user_data_dir)
             profile_dir = "Default"
             options.add_argument(f"user-data-dir={user_data_dir}")
             options.add_argument(f"--profile-directory={profile_dir}")

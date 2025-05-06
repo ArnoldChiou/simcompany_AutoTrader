@@ -1,12 +1,15 @@
 # Import classes
 from AutoBuyer import AutoBuyer
-from Trade_main import TradeMonitor
 import traceback
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+import time
 
 # Import shared configurations from config.py
 from config import (
     TARGET_PRODUCTS, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
-    MARKET_HEADERS, COOKIES # Import COOKIES
+    MARKET_HEADERS # Import MARKET_HEADERS
 )
 
 def run_auto_buyer():
@@ -30,31 +33,29 @@ def run_auto_buyer():
         print(f"AutoBuyer 執行時發生未預期的錯誤: {e}")
         traceback.print_exc()
 
-def run_trade_monitor():
-    print("\n啟動 TradeMonitor 市場監控模式 (監控所有目標產品)...")
-    print(f"目標產品: {list(TARGET_PRODUCTS.keys())}") # Show all target product names
-    print("-------------------------------------")
+def login_to_game():
+    print("\n啟動登入功能...")
     try:
-        monitor = TradeMonitor(
-            target_products=TARGET_PRODUCTS, # Pass the dictionary
-            headers=MARKET_HEADERS,
-            cookies=COOKIES
-        )
-        monitor.main_loop()
-    except KeyboardInterrupt:
-        print("使用者中斷程式。")
+        driver = webdriver.Chrome()  # 使用 Chrome 瀏覽器
+        driver.get("https://www.simcompanies.com/signin/")  # 替換為遊戲的登入頁面 URL
+
+        print("請在瀏覽器中手動登入遊戲，完成後關閉瀏覽器以繼續...")
+        input("按 Enter 確認已完成登入: ")
+        print("登入資訊已儲存，您可以繼續使用自動購買功能。")
     except Exception as e:
-        print(f"TradeMonitor 執行時發生未預期的錯誤: {e}")
+        print(f"登入過程中發生錯誤: {e}")
         traceback.print_exc()
+    finally:
+        driver.quit()
 
 if __name__ == "__main__":
     print("請選擇要執行的功能：")
-    print("1. 自動購買 (AutoBuyer - 使用 Selenium)")
-    print("2. 市場監控 (TradeMonitor)")
+    print("1. 登入遊戲")
+    print("2. 自動購買")
     mode = input("輸入 1 或 2: ").strip()
     if mode == "1":
-        run_auto_buyer()
+        login_to_game()
     elif mode == "2":
-        run_trade_monitor()
+        run_auto_buyer()
     else:
         print("輸入錯誤，程式結束。")
