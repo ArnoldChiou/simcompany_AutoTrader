@@ -16,13 +16,19 @@ PRODUCT_CONFIGS = [
         "name": "Power",
         "api_url": "https://www.simcompanies.com/api/v3/market/0/1/",
         "quality": 0,
-        "max_buy_quantity": 100000
+        "max_buy_quantity": 1000000
+    },
+    {
+        "name": "Water",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/2/",
+        "quality": 0,
+        "max_buy_quantity": 1000000
     },
     {
         "name": "Transport",
         "api_url": "https://www.simcompanies.com/api/v3/market/0/13/",
         "quality": 0,
-        "max_buy_quantity": 10000
+        "max_buy_quantity": 10000000
     },
     {
         "name": "PlantResearch",
@@ -30,6 +36,19 @@ PRODUCT_CONFIGS = [
         "quality": 0,
         "max_buy_quantity": 10
     },
+    {
+        "name": "MiningResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/31/",
+        "quality": 0,
+        "max_buy_quantity": 10
+    },
+    {
+        "name": "EnergyResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/30/",
+        "quality": 0,
+        "max_buy_quantity": 10
+    },
+    
     # Example of adding a new product:
     # {
     #     "name": "Water",
