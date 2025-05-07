@@ -3,21 +3,21 @@ import json
 import traceback
 
 def get_market_data(session, api_url, target_quality, timeout=20, return_order_detail=False):
-    print(f"--- 開始處理 Q{target_quality} 市場數據 (API: {api_url}) ---")
+    print(f"--- Start processing Q{target_quality} market data (API: {api_url}) ---")
     try:
         response = session.get(api_url, timeout=timeout)
         response.raise_for_status()
         try:
             orders = response.json()
         except json.JSONDecodeError:
-            print("錯誤：無法解析 API 回應的 JSON 數據。")
-            print(f"回應內容: {response.text[:500]}...")
+            print("Error: Unable to parse JSON data from API response.")
+            print(f"Response content: {response.text[:500]}...")
             return None
         if not isinstance(orders, list):
-            print("錯誤：API 回應的格式不是預期的列表。")
+            print("Error: API response format is not the expected list.")
             return None
         if not orders:
-            print("警告：API 回應中沒有任何訂單數據。")
+            print("Warning: No order data found in API response.")
             return None
         filtered = []
         for i, order in enumerate(orders):
@@ -39,7 +39,7 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
                 else:
                     filtered.append(price)
         if not filtered:
-            print(f"警告：未找到任何有效的 Q{target_quality} 賣單。")
+            print(f"Warning: No valid Q{target_quality} sell orders found.")
             return None
         if return_order_detail:
             filtered.sort(key=lambda x: x['price'])
@@ -63,13 +63,13 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
             else:
                 return None
     except requests.exceptions.Timeout:
-        print(f"錯誤：請求 API {api_url} 超時。")
+        print(f"Error: Request to API {api_url} timed out.")
         return None
     except requests.exceptions.RequestException as e:
-        print(f"錯誤：請求 API {api_url} 失敗: {e}")
+        print(f"Error: Request to API {api_url} failed: {e}")
         return None
     except Exception as e:
-        print(f"錯誤：處理市場數據時發生不可預期的錯誤:")
+        print(f"Error: Unexpected error occurred while processing market data:")
         traceback.print_exc()
         return None
 
@@ -88,26 +88,26 @@ def get_current_money(session, cookies, cash_api_url, market_headers, money_requ
         # Extract the 'money' field from the response
         money_data = data.get("money")
         if money_data is not None:
-            print(f"取得帳戶現金 (API): {money_data}")
+            print(f"Account cash obtained (API): {money_data}")
             return money_data
         else:
-            print("警告：API 回應中未找到預期的現金欄位。")
+            print("Warning: Expected cash field not found in API response.")
             print(f"API Response sample: {str(data)[:200]}...")
             return None
     except requests.exceptions.Timeout:
-        print(f"取得帳戶現金時請求超時 ({url})。")
+        print(f"Request timed out while obtaining account cash ({url}).")
         return None
     except requests.exceptions.RequestException as e:
-        print(f"取得帳戶現金時發生請求錯誤 ({url}): {e}")
+        print(f"Request error occurred while obtaining account cash ({url}): {e}")
         if e.response is not None:
-            print(f"完整回應內容: {e.response.text[:500]}...")
+            print(f"Full response content: {e.response.text[:500]}...")
         return None
     except json.JSONDecodeError as e:
-        print(f"取得帳戶現金時解析 JSON 失敗 ({url}): {e}")
+        print(f"Failed to parse JSON while obtaining account cash ({url}): {e}")
         if response is not None:
-            print(f"回應內容: {response.text[:500]}...")
+            print(f"Response content: {response.text[:500]}...")
         return None
     except Exception as e:
-        print(f"取得帳戶現金時發生不可預期的錯誤:")
+        print(f"Unexpected error occurred while obtaining account cash:")
         traceback.print_exc()
         return None

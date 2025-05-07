@@ -3,7 +3,7 @@
 import os
 from dotenv import load_dotenv
 
-# 載入 .env 檔案
+# Load .env file
 load_dotenv()
 
 # --- API URLs ---
@@ -82,8 +82,8 @@ COOKIES = {
 
 # --- Logic Parameters ---
 if not COOKIES.get('sessionid'):
-    print("錯誤：請創建.env檔並填入有效的 SESSIONID。 ex: SESSIONID=your_session_id")
-    print("如不知Session ID如何取得請參考README.md")
+    print("Error: Please create a .env file and enter a valid SESSIONID. ex: SESSIONID=your_session_id")
+    print("If you don't know how to get the Session ID, please refer to README.md")
 BUY_THRESHOLD_PERCENTAGE = 0.96
 DEFAULT_CHECK_INTERVAL_SECONDS = 300
 PURCHASE_WAIT_MULTIPLIER = 1.5
@@ -95,5 +95,5 @@ MONEY_REQUEST_TIMEOUT = 15
 
 # --- Validation ---
 if not COOKIES.get('sessionid'):
-    print("錯誤：請在 config.py 中填入有效的 COOKIES (sessionid)。")
+    print("Error: Please enter a valid COOKIES (sessionid) in config.py.")
 

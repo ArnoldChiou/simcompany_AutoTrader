@@ -16,7 +16,7 @@ class TradeMonitor:
         self.session.cookies.update(cookies)
 
     def get_market_data(self, product_name, product_info):
-        print(f"--- 開始處理 {product_name} (Q{product_info['quality']}) 市場數據 ---")
+        print(f"--- Start processing {product_name} (Q{product_info['quality']}) market data ---")
         return get_market_data(
             self.session,
             product_info['url'],
@@ -26,18 +26,18 @@ class TradeMonitor:
         )
 
     def trigger_buy_action(self, product_name, product_info, price):
-        print(f"===========觸發購買條件 ({product_name})===========")
-        print(f"商品 ({product_name} Q{product_info['quality']})")
-        print(f"觸發時最低價: ${price:.3f}")
-        print("!!! 警告：自動購買操作未執行 (TradeMonitor 模式)，請確認遊戲規則並手動操作 !!!")
+        print(f"===========Trigger buy condition ({product_name})===========")
+        print(f"Product ({product_name} Q{product_info['quality']})")
+        print(f"Lowest price at trigger: ${price:.3f}")
+        print("!!! WARNING: Auto-buy operation not executed (TradeMonitor mode), please check game rules and operate manually !!!")
         print(f"===================================")
 
     def main_loop(self):
         while True:
-            print("\n" + "=" * 15 + " 開始新一輪檢查 (所有目標產品) " + "=" * 15)
+            print("\n" + "=" * 15 + " Start a new round of checks (all target products) " + "=" * 15)
 
             for product_name, product_info in self.TARGET_PRODUCTS.items():
-                print(f"\n--- 檢查產品: {product_name} (Q{product_info['quality']}) ---")
+                print(f"\n--- Checking product: {product_name} (Q{product_info['quality']}) ---")
                 market_data = self.get_market_data(product_name, product_info)
 
                 if market_data and 'lowest_price' in market_data and 'second_lowest_price' in market_data:
@@ -45,21 +45,21 @@ class TradeMonitor:
                     second_lowest_price = market_data['second_lowest_price']
 
                     buy_threshold_price = second_lowest_price * BUY_THRESHOLD_PERCENTAGE
-                    print(f"計算閾值 ({product_name}): 次低價 ${second_lowest_price:.3f} 的 {BUY_THRESHOLD_PERCENTAGE*100}% = ${buy_threshold_price:.3f}")
+                    print(f"Threshold calculation ({product_name}): Second lowest price ${second_lowest_price:.3f} at {BUY_THRESHOLD_PERCENTAGE*100}% = ${buy_threshold_price:.3f}")
 
                     if lowest_price < buy_threshold_price:
-                        print(f"***> 條件滿足 ({product_name})! 最低價 ${lowest_price:.3f} < 閾值 ${buy_threshold_price:.3f}")
+                        print(f"***> Condition met ({product_name})! Lowest price ${lowest_price:.3f} < threshold ${buy_threshold_price:.3f}")
                         self.trigger_buy_action(product_name, product_info, lowest_price)
                     else:
-                        print(f"---> 條件未滿足 ({product_name})。最低價 ${lowest_price:.3f} >= 閾值 ${buy_threshold_price:.3f}")
+                        print(f"---> Condition not met ({product_name}). Lowest price ${lowest_price:.3f} >= threshold ${buy_threshold_price:.3f}")
 
                 elif market_data and 'lowest_price' in market_data:
-                    print(f"僅找到一個價格 ({product_name}: 最低價 ${market_data['lowest_price']:.3f})，無法比較，跳過觸發檢查。")
+                    print(f"Only one price found ({product_name}: lowest price ${market_data['lowest_price']:.3f}), cannot compare, skipping trigger check.")
                 else:
-                    print(f"本次檢查未能獲取足夠的市場數據 ({product_name}: 最低價和次低價)，稍後重試。")
+                    print(f"Insufficient market data obtained this check ({product_name}: lowest and second lowest price), will retry later.")
 
                 time.sleep(1)
 
             check_interval_seconds = DEFAULT_CHECK_INTERVAL_SECONDS
-            print(f"\n所有產品檢查完成，休眠 {check_interval_seconds} 秒...")
+            print(f"\nAll product checks complete, sleeping for {check_interval_seconds} seconds...")
             time.sleep(check_interval_seconds)
