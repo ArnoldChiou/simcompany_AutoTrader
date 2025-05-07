@@ -176,6 +176,8 @@ class AutoBuyer:
         try:
             options = webdriver.ChromeOptions()
             user_data_dir = os.getenv("USER_DATA_DIR")
+            if not user_data_dir:
+                raise ValueError(".env檔案中USER_DATA_DIR 環境變數未設置或為空，請檢查設定。")
             if not os.path.exists(user_data_dir):
                 raise FileNotFoundError(f"The specified user data directory does not exist: {user_data_dir}")
             print(user_data_dir)
@@ -275,9 +277,9 @@ class AutoBuyer:
                     self.driver.quit()
                     print("WebDriver 已關閉。")
                     self.driver = None
-                wait_modifier = PURCHASE_WAIT_MULTIPLIER if purchase_attempted_in_cycle else 1
-                check_interval_seconds = DEFAULT_CHECK_INTERVAL_SECONDS * wait_modifier
-                print(f"\n所有產品檢查完成，休眠 {check_interval_seconds:.0f} 秒...")
+                import random
+                check_interval_seconds = random.uniform(DEFAULT_CHECK_INTERVAL_SECONDS * 0.1, DEFAULT_CHECK_INTERVAL_SECONDS)
+                print(f"\n所有產品檢查完成，休眠 {check_interval_seconds:.2f} 秒...")
                 time.sleep(check_interval_seconds)
 
         except WebDriverException as e:
