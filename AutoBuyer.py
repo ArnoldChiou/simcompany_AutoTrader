@@ -223,11 +223,20 @@ class AutoBuyer:
                             try:
                                 login_check_element_selector = 'input[name="quantity"]'
                                 print(f"Waiting for login indicator element ({login_check_element_selector}) to be visible and clickable...")
-                                WebDriverWait(self.driver, 15).until(
-                                    EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector))
-                                )
-                                print("Login status OK.")
-                                login_confirmed = True
+                                # Robust wait: retry if StaleElementReferenceException occurs
+                                wait = WebDriverWait(self.driver, 15)
+                                for attempt in range(3):
+                                    try:
+                                        wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector)))
+                                        print("Login status OK.")
+                                        login_confirmed = True
+                                        break
+                                    except StaleElementReferenceException:
+                                        print(f"StaleElementReferenceException caught while waiting for login element, retrying ({attempt+1}/3)...")
+                                        time.sleep(1)
+                                        continue
+                                else:
+                                    raise TimeoutException("Failed to get a stable reference to the login element after retries.")
                             except TimeoutException:
                                 print("\n" + "*"*20)
                                 print("Warning: Login indicator element not found within expected time.")
@@ -238,11 +247,19 @@ class AutoBuyer:
                                 print("Trying to refresh the page and check login status again...")
                                 self.driver.refresh()
                                 try:
-                                    WebDriverWait(self.driver, 10).until(
-                                        EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector))
-                                    )
-                                    print("Login confirmed after refresh.")
-                                    login_confirmed = True
+                                    wait = WebDriverWait(self.driver, 10)
+                                    for attempt in range(3):
+                                        try:
+                                            wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector)))
+                                            print("Login confirmed after refresh.")
+                                            login_confirmed = True
+                                            break
+                                        except StaleElementReferenceException:
+                                            print(f"StaleElementReferenceException caught after refresh, retrying ({attempt+1}/3)...")
+                                            time.sleep(1)
+                                            continue
+                                    else:
+                                        print("XXX Warning: Still unable to confirm login status after refresh. Subsequent purchase may fail. XXX")
                                 except TimeoutException:
                                     print("XXX Warning: Still unable to confirm login status after refresh. Subsequent purchase may fail. XXX")
 
