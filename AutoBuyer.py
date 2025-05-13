@@ -187,14 +187,27 @@ class AutoBuyer:
             options.add_experimental_option("excludeSwitches", ["enable-logging"])
             while True:
                 purchase_attempted_in_cycle = False
+                api_error_in_cycle = False  # New flag for API errors
                 print("\n" + "=" * 15 + " Starting new check cycle (all target products) " + "=" * 15)
 
                 for product_name, product_info in self.TARGET_PRODUCTS.items():
+                    if api_error_in_cycle:  # If an error occurred, skip remaining products for this cycle
+                        print(f"Skipping remaining products in this cycle due to an earlier API error.")
+                        break
+
                     print(f"\n--- Checking product: {product_name} (Q{product_info['quality']}) ---")
 
-                    market_data = self.get_market_data(product_name, product_info)  # Pass product details
+                    market_data = self.get_market_data(product_name, product_info)
 
-                    if market_data and 'lowest_order' in market_data and 'second_lowest_price' in market_data:
+                    if market_data is None:
+                        # This indicates a failure in get_market_data, e.g. 429 error.
+                        # market_utils.get_market_data is expected to print the specific error.
+                        print(f"Failed to fetch market data for {product_name}. Assuming API issue (e.g., rate limit). Backing off for this cycle.")
+                        api_error_in_cycle = True
+                        break  # Exit the product loop immediately to enforce backoff
+
+                    # Proceed if market_data is not None
+                    if 'lowest_order' in market_data and 'second_lowest_price' in market_data:
                         lowest_order = market_data['lowest_order']
                         lowest_price = lowest_order['price']
                         second_lowest_price = market_data['second_lowest_price']
@@ -207,13 +220,12 @@ class AutoBuyer:
                             if self.driver is None:
                                 print("Initializing Selenium WebDriver...")
                                 service = ChromeService(ChromeDriverManager().install())
-                                driver = webdriver.Chrome(service=service, options=options)
-                                self.driver = driver
+                                self.driver = webdriver.Chrome(service=service, options=options)
 
                             resource_id = self._extract_resource_id(product_info['url'])
                             if resource_id is None:
                                 print(f"XXX Unable to start purchase for {product_name}, could not parse resource ID. Skipping this product. XXX")
-                                continue  # Skip to the next product
+                                continue
 
                             market_page_url = f"https://www.simcompanies.com/market/resource/{resource_id}/"
 
@@ -247,7 +259,7 @@ class AutoBuyer:
                                 print("Trying to refresh the page and check login status again...")
                                 self.driver.refresh()
                                 try:
-                                    wait = WebDriverWait(self.driver, 10)
+                                    wait = WebDriverWait(self.driver, 15)
                                     for attempt in range(3):
                                         try:
                                             wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector)))
@@ -282,22 +294,42 @@ class AutoBuyer:
                         else:
                             print(f"---> Condition not met ({product_name}). Lowest price ${lowest_price:.3f} >= threshold ${buy_threshold_price:.3f}")
 
-                    elif market_data and 'lowest_order' in market_data:
+                    elif 'lowest_order' in market_data:  # market_data is not None here
                         lowest_order = market_data['lowest_order']
                         print(f"Only one price level found ({product_name}: lowest order ID:{lowest_order['id']}, ${lowest_order['price']:.3f}, {lowest_order['quantity']} units), cannot compare, skipping trigger check.")
-                    else:
-                        print(f"Not enough market data obtained this check ({product_name}: lowest order and second lowest price), will retry later.")
+                    else:  # market_data is not None, but doesn't have expected keys
+                        print(f"Not enough market data obtained this check ({product_name}: missing lowest order and/or second lowest price), will retry later.")
+                        # If market_data is incomplete (e.g. after a 429 error was logged by a utility),
+                        # treat this as an API error to trigger backoff.
+                        print(f"Assuming API issue for {product_name} due to incomplete data. Backing off for this cycle.")
+                        api_error_in_cycle = True
+                        break  # Exit the product loop immediately to enforce backoff
 
-                    time.sleep(1)  # Optional: Add a small delay between checking different products
-                if self.driver:
-                    print("Purchase complete, closing WebDriver...")
-                    self.driver.quit()
-                    print("WebDriver closed.")
-                    self.driver = None
+                    if not api_error_in_cycle:  # Only sleep if no API error caused an early break
+                        time.sleep(5)  # Optional: Add a small delay between checking different products
+
+                if self.driver:  # If WebDriver was initialized in this cycle
+                    print("\nEnsuring WebDriver is closed at the end of the cycle...")
+                    try:
+                        self.driver.quit()
+                        print("WebDriver closed successfully.")
+                    except Exception as e:  # Catch more general exceptions during quit
+                        print(f"Error closing WebDriver: {type(e).__name__} - {e}")
+                    finally:
+                        self.driver = None  # Important to reset for the next cycle
+
                 import random
-                check_interval_seconds = random.uniform(DEFAULT_CHECK_INTERVAL_SECONDS * 0.1, DEFAULT_CHECK_INTERVAL_SECONDS)
-                print(f"\nAll product checks complete, sleeping for {check_interval_seconds:.2f} seconds...")
-                time.sleep(check_interval_seconds)
+                # Determine sleep duration for the end of the cycle
+                sleep_duration_seconds = random.uniform(DEFAULT_CHECK_INTERVAL_SECONDS * 0.1, DEFAULT_CHECK_INTERVAL_SECONDS)
+
+                if api_error_in_cycle:
+                    # Override with a longer, fixed backoff if an API error (e.g., 429) occurred
+                    sleep_duration_seconds = 100.0  # 5 minutes fixed backoff
+                    print(f"\nAPI error occurred in this cycle. Applying a fixed backoff delay of {sleep_duration_seconds:.2f} seconds.")
+                else:
+                    print(f"\nAll product checks complete for this cycle, sleeping for {sleep_duration_seconds:.2f} seconds...")
+
+                time.sleep(sleep_duration_seconds)
 
         except WebDriverException as e:
             print(f"XXX Error occurred while starting or operating WebDriver: {type(e).__name__} XXX")
@@ -308,7 +340,11 @@ class AutoBuyer:
             traceback.print_exc()
         finally:
             if self.driver:
-                print("Closing Selenium WebDriver...")
-                self.driver.quit()
-                print("WebDriver closed.")
-                self.driver = None  # Reset driver for the next potential purchase
+                print("Closing Selenium WebDriver due to an exception or loop termination in finally block...")
+                try:
+                    self.driver.quit()
+                    print("WebDriver closed successfully in finally block.")
+                except Exception as e:  # Catch more general exceptions during quit
+                    print(f"Error closing WebDriver in finally block: {type(e).__name__} - {e}")
+                finally:
+                    self.driver = None  # Ensure it's reset
