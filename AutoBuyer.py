@@ -236,7 +236,7 @@ class AutoBuyer:
                                 login_check_element_selector = 'input[name="quantity"]'
                                 print(f"Waiting for login indicator element ({login_check_element_selector}) to be visible and clickable...")
                                 # Robust wait: retry if StaleElementReferenceException occurs
-                                wait = WebDriverWait(self.driver, 15)
+                                wait = WebDriverWait(self.driver, 20)
                                 for attempt in range(3):
                                     try:
                                         wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector)))
