@@ -48,60 +48,6 @@ PRODUCT_CONFIGS = [
         "quality": 0,
         "max_buy_quantity": 100
     },
-    {
-        "name": "ElectronicsResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "BreedingResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/33/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "ChemistryResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/34/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "Software",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/35/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "AutomotiveResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/58/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "FashionResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/59/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "Aerospace research",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/100/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "MaterialsResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/113/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
-    {
-        "name": "Recipes",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/145/",
-        "quality": 0,
-        "max_buy_quantity": 100
-    },
 
     # Example of adding a new product:
     # {
