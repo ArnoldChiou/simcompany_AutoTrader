@@ -37,6 +37,9 @@ class AutoBuyer:
         self.session = requests.Session() # Keep requests session for market data fetching
         self.session.headers.update(self.MARKET_HEADERS)
         self.driver = driver # This will be None initially, set in main_loop
+        # --- Add market data cache ---
+        self._market_data_cache = {}  # key: (product_name, quality), value: (timestamp, data)
+        self._market_data_cache_ttl = 60  # seconds, adjust as needed
 
     def _extract_resource_id(self, url):
         """Parse resource ID from product API URL"""
@@ -50,16 +53,27 @@ class AutoBuyer:
 
     # --- Modified get_market_data to accept product details ---
     def get_market_data(self, product_name, product_info):
+        # --- Use cache to reduce web requests ---
+        cache_key = (product_name, product_info['quality'])
+        now = time.time()
+        if cache_key in self._market_data_cache:
+            ts, data = self._market_data_cache[cache_key]
+            if now - ts < self._market_data_cache_ttl:
+                print(f"[CACHE] Using cached market data for {product_name} (Q{product_info['quality']})")
+                return data
         temp_session = requests.Session()
         temp_session.headers.update(self.MARKET_HEADERS)
         print(f"--- Start processing {product_name} (Q{product_info['quality']}) market data ---")
-        return get_market_data(
+        data = get_market_data(
             temp_session,
             product_info['url'], # Use URL from product_info
             product_info['quality'], # Use quality from product_info
             timeout=REQUEST_TIMEOUT,
             return_order_detail=True
         )
+        # --- Update cache ---
+        self._market_data_cache[cache_key] = (now, data)
+        return data
 
     # --- Modified trigger_buy_action to accept product details ---
     def trigger_buy_action(self, product_name, product_info, order_id, price, quantity_available):
@@ -190,7 +204,12 @@ class AutoBuyer:
                 api_error_in_cycle = False  # New flag for API errors
                 print("\n" + "=" * 15 + " Starting new check cycle (all target products) " + "=" * 15)
 
-                for product_name, product_info in self.TARGET_PRODUCTS.items():
+                # --- Shuffle product order to avoid pattern ---
+                import random
+                product_items = list(self.TARGET_PRODUCTS.items())
+                random.shuffle(product_items)
+
+                for product_name, product_info in product_items:
                     if api_error_in_cycle:  # If an error occurred, skip remaining products for this cycle
                         print(f"Skipping remaining products in this cycle due to an earlier API error.")
                         break
@@ -306,7 +325,10 @@ class AutoBuyer:
                         break  # Exit the product loop immediately to enforce backoff
 
                     if not api_error_in_cycle:  # Only sleep if no API error caused an early break
-                        time.sleep(5)  # Optional: Add a small delay between checking different products
+                        # --- Add random jitter between product checks (2-8s) ---
+                        sleep_time = random.uniform(2, 8)
+                        print(f"Sleeping {sleep_time:.2f} seconds before next product check...")
+                        time.sleep(sleep_time)
 
                 if self.driver:  # If WebDriver was initialized in this cycle
                     print("\nEnsuring WebDriver is closed at the end of the cycle...")
@@ -318,13 +340,14 @@ class AutoBuyer:
                     finally:
                         self.driver = None  # Important to reset for the next cycle
 
-                import random
-                # Determine sleep duration for the end of the cycle
-                sleep_duration_seconds = random.uniform(DEFAULT_CHECK_INTERVAL_SECONDS * 0.1, DEFAULT_CHECK_INTERVAL_SECONDS)
+                # --- Increase and randomize sleep duration between cycles ---
+                min_sleep = DEFAULT_CHECK_INTERVAL_SECONDS * 0.8
+                max_sleep = DEFAULT_CHECK_INTERVAL_SECONDS * 2.5
+                sleep_duration_seconds = random.uniform(min_sleep, max_sleep)
 
                 if api_error_in_cycle:
                     # Override with a longer, fixed backoff if an API error (e.g., 429) occurred
-                    sleep_duration_seconds = 100.0  # 5 minutes fixed backoff
+                    sleep_duration_seconds = max(120.0, sleep_duration_seconds)  # At least 2 minutes backoff
                     print(f"\nAPI error occurred in this cycle. Applying a fixed backoff delay of {sleep_duration_seconds:.2f} seconds.")
                 else:
                     print(f"\nAll product checks complete for this cycle, sleeping for {sleep_duration_seconds:.2f} seconds...")
