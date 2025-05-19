@@ -164,11 +164,11 @@ def produce_power_plant():
     自動點擊 Power plant 並啟動 24h 生產。
     """
     driver = _initialize_driver()
+    finish_times = []  # 新增：收集所有完成時間
     try:
         driver.get("https://www.simcompanies.com/landscape/")
         target_selectors = [
             'a[href="/b/40253730/"]',
-            #'a[href="/b/43715182/"]',
             'a[href="/b/39825683/"]',
             'a[href="/b/39888395/"]',
             'a[href="/b/39915579/"]',
@@ -177,7 +177,6 @@ def produce_power_plant():
             'a[href="/b/39825679/"]',
             'a[href="/b/39693844/"]',
             'a[href="/b/39825691/"]',
-            #'a[href="/b/43694783/"]',
             'a[href="/b/39825676/"]',
             'a[href="/b/39825686/"]',
             'a[href="/b/41178098/"]',
@@ -189,22 +188,45 @@ def produce_power_plant():
                 )
                 driver.find_element(By.CSS_SELECTOR, target_selector).click()
                 time.sleep(2)
-                # 嘗試點擊 24h 按鈕，若無則略過
+                # 嘗試點擊 24h 按鈕，若無則略過並抓取完成時間
                 try:
                     btn_24h = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]"))
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]") )
                     )
                     btn_24h.click()
                     time.sleep(1)
                     # 點擊 Produce 按鈕
                     btn_produce = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]"))
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]") )
                     )
                     btn_produce.click()
                     print(f"{target_selector} 已自動啟動 24h 生產！")
                     time.sleep(2)
                 except Exception:
-                    print(f"{target_selector} 已在生產中，略過。")
+                    print(f"{target_selector} 已在生產中，略過。嘗試抓取完成時間...")
+                    # 抓取 Finishes at ...
+                    try:
+                        # 重新點擊一次進入建築
+                        driver.get("https://www.simcompanies.com/landscape/")
+                        WebDriverWait(driver, 30).until(
+                            EC.element_to_be_clickable((By.CSS_SELECTOR, target_selector))
+                        )
+                        driver.find_element(By.CSS_SELECTOR, target_selector).click()
+                        time.sleep(2)
+                        # 尋找 Finishes at ...
+                        finish_time = None
+                        p_tags = driver.find_elements(By.TAG_NAME, 'p')
+                        for p in p_tags:
+                            if p.text.strip().startswith('Finishes at'):
+                                finish_time = p.text.strip()
+                                break
+                        if finish_time:
+                            print(f"{target_selector} {finish_time}")
+                            finish_times.append(finish_time)
+                        else:
+                            print(f"{target_selector} 未找到完成時間。")
+                    except Exception as e2:
+                        print(f"{target_selector} 抓取完成時間失敗: {e2}")
                 # 回到 landscape 頁面
                 driver.get("https://www.simcompanies.com/landscape/")
                 time.sleep(1)
@@ -215,20 +237,39 @@ def produce_power_plant():
             driver.quit()
         except (Exception, KeyboardInterrupt):
             pass
-    # 點擊完成後，等待 24 小時再次執行
+    # 點擊完成後，等待所有建築的最晚完成時間再次執行
     import time as _time
     import winsound
-    try:
-        print("所有建築已自動啟動 24h 生產，將於 24 小時後再次執行。")
+    import datetime
+    from dateutil import parser
+    max_wait = 0
+    max_time_str = None
+    now = datetime.datetime.now()
+    for finish_time in finish_times:
+        try:
+            # 例: 'Finishes at 5/20/2025 3:59 PM'
+            time_str = finish_time.replace('Finishes at', '').strip()
+            finish_dt = parser.parse(time_str)
+            wait_seconds = (finish_dt - now).total_seconds()
+            if wait_seconds > max_wait:
+                max_wait = wait_seconds
+                max_time_str = finish_time
+        except Exception:
+            continue
+    if max_wait > 0:
+        print(f"將於 {max_wait:.0f} 秒後(最晚: {max_time_str})自動重新執行批次生產！")
         for _ in range(3):
             winsound.Beep(1000, 500)
             _time.sleep(0.5)
-        _time.sleep(24 * 60 * 60)
-        print("\n=== 24 小時已到，重新執行批次生產！===\n")
+        try:
+            _time.sleep(max_wait)
+        except KeyboardInterrupt:
+            print("\n[中斷] 等待期間被手動中斷，安全結束。")
+            return
+        print("\n=== 生產已完成，重新執行批次生產！===\n")
         produce_power_plant()
-    except KeyboardInterrupt:
-        print("\n[中斷] 等待期間被手動中斷，安全結束。")
-        return
+    else:
+        print("所有建築皆無需等待或時間解析失敗。")
 
 if __name__ == "__main__":
     print("請選擇要執行的功能：")
