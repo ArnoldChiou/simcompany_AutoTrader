@@ -5,6 +5,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import time
+# Import functions from production_monitor.py
+from production_monitor import get_forest_nursery_finish_time, produce_power_plant
 
 # Import shared configurations from config.py
 from config import (
@@ -52,10 +54,16 @@ if __name__ == "__main__":
     print("Please select the function to execute:")
     print("1. Login to game")
     print("2. Auto-buy")
-    mode = input("Enter 1 or 2: ").strip()
+    print("3. Monitor Forest Nursery")
+    print("4. Produce Power Plant")
+    mode = input("Enter 1, 2, 3, or 4: ").strip()
     if mode == "1":
         login_to_game()
     elif mode == "2":
         run_auto_buyer()
+    elif mode == "3":
+        get_forest_nursery_finish_time()
+    elif mode == "4":
+        produce_power_plant()
     else:
         print("Input error, program ended.")
