@@ -14,16 +14,33 @@ load_dotenv()
 def _initialize_driver():
     options = webdriver.ChromeOptions()
     user_data_dir = os.getenv("USER_DATA_DIR")
-    if not user_data_dir:
-        raise ValueError("USER_DATA_DIR environment variable not set or empty in .env file, please check configuration.")
-    if not os.path.exists(user_data_dir):
-        raise FileNotFoundError(f"The specified user data directory does not exist: {user_data_dir}")
     profile_dir = "Default"
-    options.add_argument(f"user-data-dir={user_data_dir}")
-    options.add_argument(f"--profile-directory={profile_dir}")
+    # 新增常見修復參數
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    options.add_argument('--remote-debugging-port=9222')
     options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
-    return driver
+    # 嘗試使用 user-data-dir，若失敗則 fallback
+    if user_data_dir and os.path.exists(user_data_dir):
+        try:
+            options.add_argument(f"user-data-dir={user_data_dir}")
+            options.add_argument(f"--profile-directory={profile_dir}")
+            driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+            return driver
+        except Exception as e:
+            print(f"[警告] 使用 user-data-dir 啟動 Chrome 失敗: {e}\n將改用預設 profile 啟動。")
+            # 移除 user-data-dir 參數再試一次
+            options = webdriver.ChromeOptions()
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--remote-debugging-port=9222')
+            options.add_experimental_option("excludeSwitches", ["enable-logging"])
+            driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+            return driver
+    else:
+        print("[警告] USER_DATA_DIR 未設置或不存在，將用預設 profile 啟動 Chrome。")
+        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+        return driver
 
 def get_forest_nursery_finish_time():
     driver = _initialize_driver()

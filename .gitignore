@@ -1,3 +1,4 @@
 /.env
 /__pycache__
 /successful_trade.txt
+/finish_time.txt
