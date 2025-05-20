@@ -182,29 +182,28 @@ def produce_power_plant():
     """
     driver = _initialize_driver()
     finish_times = []  # 新增：收集所有完成時間
+    base_url = "https://www.simcompanies.com"
     try:
-        driver.get("https://www.simcompanies.com/landscape/")
-        target_selectors = [
-            'a[href="/b/40253730/"]',
-            'a[href="/b/39825683/"]',
-            'a[href="/b/39888395/"]',
-            'a[href="/b/39915579/"]',
-            'a[href="/b/43058380/"]',
-            'a[href="/b/39825725/"]',
-            'a[href="/b/39825679/"]',
-            'a[href="/b/39693844/"]',
-            'a[href="/b/39825691/"]',
-            'a[href="/b/39825676/"]',
-            'a[href="/b/39825686/"]',
-            'a[href="/b/41178098/"]',
+        # target_selectors now store only the path part of the URL
+        target_paths = [
+            "/b/40253730/",
+            "/b/39825683/",
+            "/b/39888395/",
+            "/b/39915579/",
+            "/b/43058380/",
+            "/b/39825725/",
+            "/b/39825679/",
+            "/b/39693844/",
+            "/b/39825691/",
+            "/b/39825676/",
+            "/b/39825686/",
+            "/b/41178098/",
         ]
-        for target_selector in target_selectors:
+        for target_path in target_paths:
+            building_url = base_url + target_path
             try:
-                WebDriverWait(driver, 30).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, target_selector))
-                )
-                driver.find_element(By.CSS_SELECTOR, target_selector).click()
-                time.sleep(2)
+                driver.get(building_url)
+                time.sleep(2) # Wait for page to load
                 # 嘗試點擊 24h 按鈕，若無則略過並抓取完成時間
                 try:
                     btn_24h = WebDriverWait(driver, 5).until(
@@ -217,20 +216,13 @@ def produce_power_plant():
                         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]") )
                     )
                     btn_produce.click()
-                    print(f"{target_selector} 已自動啟動 24h 生產！")
+                    print(f"{target_path} 已自動啟動 24h 生產！")
                     time.sleep(2)
                 except Exception:
-                    print(f"{target_selector} 已在生產中，略過。嘗試抓取完成時間...")
+                    print(f"{target_path} 已在生產中，略過。嘗試抓取完成時間...")
                     # 抓取 Finishes at ...
+                    # No need to re-navigate, already on the building page
                     try:
-                        # 重新點擊一次進入建築
-                        driver.get("https://www.simcompanies.com/landscape/")
-                        WebDriverWait(driver, 30).until(
-                            EC.element_to_be_clickable((By.CSS_SELECTOR, target_selector))
-                        )
-                        driver.find_element(By.CSS_SELECTOR, target_selector).click()
-                        time.sleep(2)
-                        # 尋找 Finishes at ...
                         finish_time = None
                         p_tags = driver.find_elements(By.TAG_NAME, 'p')
                         for p in p_tags:
@@ -238,17 +230,16 @@ def produce_power_plant():
                                 finish_time = p.text.strip()
                                 break
                         if finish_time:
-                            print(f"{target_selector} {finish_time}")
+                            print(f"{target_path} {finish_time}")
                             finish_times.append(finish_time)
                         else:
-                            print(f"{target_selector} 未找到完成時間。")
+                            print(f"{target_path} 未找到完成時間。")
                     except Exception as e2:
-                        print(f"{target_selector} 抓取完成時間失敗: {e2}")
-                # 回到 landscape 頁面
-                driver.get("https://www.simcompanies.com/landscape/")
-                time.sleep(1)
+                        print(f"{target_path} 抓取完成時間失敗: {e2}")
+                # No need to go back to landscape page explicitly in the loop for each building
+                time.sleep(1) # Small delay before processing next building
             except Exception as e:
-                print(f"[Power plant 啟動失敗] {target_selector}: {e}")
+                print(f"[Power plant {target_path} 啟動失敗]: {e}")
     finally:
         try:
             driver.quit()
