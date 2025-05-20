@@ -287,6 +287,7 @@ def produce_power_plant():
         produce_power_plant()
     else:
         print("所有建築皆無需等待或時間解析失敗。")
+        produce_power_plant()
 
 if __name__ == "__main__":
     print("請選擇要執行的功能：")
