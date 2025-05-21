@@ -201,62 +201,67 @@ def get_forest_nursery_finish_time():
 
 def produce_power_plant():
     """
-    自動點擊 Power plant 並啟動 24h 生產。
+    自動點擊 Power plant 並啟動 24h 生產（多分頁並行）。
     """
     driver = initialize_driver()  # Use the new utility function
-    finish_times = []  # 新增：收集所有完成時間
+    finish_times = []  # 收集所有完成時間
     base_url = "https://www.simcompanies.com"
+    target_paths = [
+        "/b/40253730/",
+        "/b/39825683/",
+        "/b/39888395/",
+        "/b/39915579/",
+        "/b/43058380/",
+        "/b/39825725/",
+        "/b/39825679/",
+        "/b/39693844/",
+        "/b/39825691/",
+        "/b/39825676/",
+        "/b/39825686/",
+        "/b/41178098/",
+    ]
     try:
-        target_paths = [
-            "/b/40253730/",
-            "/b/39825683/",
-            "/b/39888395/",
-            "/b/39915579/",
-            "/b/43058380/",
-            "/b/39825725/",
-            "/b/39825679/",
-            "/b/39693844/",
-            "/b/39825691/",
-            "/b/39825676/",
-            "/b/39825686/",
-            "/b/41178098/",
-        ]
-        for target_path in target_paths:
-            building_url = base_url + target_path
+        # 開啟第一個分頁
+        driver.get(base_url + target_paths[0])
+        # 依序為每個 target_path 開新分頁
+        for idx, target_path in enumerate(target_paths):
+            if idx == 0:
+                continue  # 第一個已開啟
+            driver.execute_script(f"window.open('{base_url + target_path}', '_blank');")
+            time.sleep(0.2)
+        # 取得所有分頁 handle
+        handles = driver.window_handles
+        # 依序切換分頁並執行啟動/檢查
+        for idx, handle in enumerate(handles):
+            driver.switch_to.window(handle)
+            time.sleep(0.5)
             try:
-                driver.get(building_url)
-                time.sleep(2)
+                btn_24h = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]") )
+                )
+                btn_24h.click()
+                btn_produce = WebDriverWait(driver, 5).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]") )
+                )
+                btn_produce.click()
+                print(f"{target_paths[idx]} 已自動啟動 24h 生產！")
+            except Exception:
+                print(f"{target_paths[idx]} 已在生產中，略過。嘗試抓取完成時間...")
                 try:
-                    btn_24h = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]") )
-                    )
-                    btn_24h.click()
-                    time.sleep(1)
-                    btn_produce = WebDriverWait(driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]") )
-                    )
-                    btn_produce.click()
-                    print(f"{target_path} 已自動啟動 24h 生產！")
-                    time.sleep(2)
-                except Exception:
-                    print(f"{target_path} 已在生產中，略過。嘗試抓取完成時間...")
-                    try:
-                        finish_time = None
-                        p_tags = driver.find_elements(By.TAG_NAME, 'p')
-                        for p in p_tags:
-                            if p.text.strip().startswith('Finishes at'):
-                                finish_time = p.text.strip()
-                                break
-                        if finish_time:
-                            print(f"{target_path} {finish_time}")
-                            finish_times.append(finish_time)
-                        else:
-                            print(f"{target_path} 未找到完成時間。")
-                    except Exception as e2:
-                        print(f"{target_path} 抓取完成時間失敗: {e2}")
-                time.sleep(1)
-            except Exception as e:
-                print(f"[Power plant {target_path} 啟動失敗]: {e}")
+                    finish_time = None
+                    p_tags = driver.find_elements(By.TAG_NAME, 'p')
+                    for p in p_tags:
+                        if p.text.strip().startswith('Finishes at'):
+                            finish_time = p.text.strip()
+                            break
+                    if finish_time:
+                        print(f"{target_paths[idx]} {finish_time}")
+                        finish_times.append(finish_time)
+                    else:
+                        print(f"{target_paths[idx]} 未找到完成時間。")
+                except Exception as e2:
+                    print(f"{target_paths[idx]} 抓取完成時間失敗: {e2}")
+        time.sleep(1)
     finally:
         try:
             driver.quit()
