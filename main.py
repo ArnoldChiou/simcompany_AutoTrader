@@ -5,6 +5,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import time
+import inquirer # Import inquirer
 # Import functions from production_monitor.py
 from production_monitor import get_forest_nursery_finish_time, produce_power_plant,monitor_all_oil_rigs_status
 
@@ -52,13 +53,28 @@ def login_to_game():
 
 if __name__ == "__main__":
     try:
-        print("Please select the function to execute:")
-        print("1. Login to game")
-        print("2. Auto-buy")
-        print("3. Monitor Forest Nursery")
-        print("4. Produce Power Plant")
-        print("5. Monitor All Oil Rigs") # Added option 5 to the prompt
-        mode = input("Enter 1, 2, 3, 4, or 5: ").strip() # Updated input prompt
+        questions = [
+            inquirer.List(
+                "mode",
+                message="Please select the function to execute:",
+                choices=[
+                    ("Login to game", "1"),
+                    ("Auto-buy", "2"),
+                    ("Monitor Forest Nursery", "3"),
+                    ("Produce Power Plant", "4"),
+                    ("Monitor All Oil Rigs", "5"),
+                    ("Exit", "exit"), # Added an exit option
+                ],
+            ),
+        ]
+        answers = inquirer.prompt(questions)
+
+        if not answers: # Handle case where prompt is exited (e.g., Ctrl+C)
+            print("\nNo selection made, program ended.")
+            exit()
+
+        mode = answers["mode"]
+
         if mode == "1":
             login_to_game()
         elif mode == "2":
@@ -69,7 +85,10 @@ if __name__ == "__main__":
             produce_power_plant()
         elif mode == "5":
             monitor_all_oil_rigs_status()
-        else:
-            print("Input error, program ended.")
+        elif mode == "exit": # Handle the new exit option
+            print("Program ended.")
+        else: # Should not happen with List prompt, but good for robustness
+            print("Invalid selection, program ended.")
+
     except KeyboardInterrupt:
         print("\n程式被終止 (Program terminated by user).")
