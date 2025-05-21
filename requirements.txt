@@ -4,3 +4,4 @@ webdriver-manager
 python-dotenv
 python-dateutil
 inquirer
+google_auth_oauthlib
