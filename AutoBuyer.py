@@ -156,9 +156,14 @@ class AutoBuyer:
                 print(f">>> Selenium buy operation ({product_name}) executed (no immediate error detected) <<<")
 
                 try:
-                    with open('successful_trade.txt', 'a', encoding='utf-8') as f:
-                        import datetime
-                        f.write(f"{datetime.datetime.now().isoformat()} | Product:{product_name} | ResourceID:{resource_id} | OrderID:{order_id} | Price:{price} | Quantity:{buy_quantity} | Quality:{target_quality}\n") # Added product_name
+                    import datetime
+                    timestamp = datetime.datetime.now().isoformat()
+                    log_entry = f"{timestamp} | Product:{product_name} | ResourceID:{resource_id} | OrderID:{order_id} | Price:{price} | Quantity:{buy_quantity} | Quality:{target_quality}\n"
+                    if not os.path.exists('record'):
+                        os.makedirs('record')
+                    with open('record/successful_trade.txt', 'a', encoding='utf-8') as f:
+                        f.write(log_entry)
+                    print(f"Trade logged: {log_entry.strip()}")
                 except Exception as log_err:
                     print(f"[Log] Failed to write to successful_trade file: {log_err}")
                 print(f"===================================")

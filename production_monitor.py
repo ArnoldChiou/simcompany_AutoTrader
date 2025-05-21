@@ -125,7 +125,10 @@ def get_forest_nursery_finish_time():
             except Exception as e_building:
                 print(f"[處理 {building_url} 失敗]: {e_building}")
         
-        with open('finish_time.txt', 'w', encoding='utf-8') as f:
+        # --- Ensure 'record' directory exists ---
+        if not os.path.exists('record'):
+            os.makedirs('record')
+        with open('record/finish_time.txt', 'w', encoding='utf-8') as f:
             for path, ft_str in production_finish_times:
                 f.write(f"{path}: {ft_str}\n")
     finally:
@@ -161,9 +164,6 @@ def get_forest_nursery_finish_time():
             print("所有偵測到的施工均已過期或完成，立即重新執行檢查...")
             get_forest_nursery_finish_time()
             return
-
-    min_wait_production = None
-    min_path_production = None
     for path, finish_time_str_prod in production_finish_times:
         try:
             finish_dt_prod = parser.parse(finish_time_str_prod)

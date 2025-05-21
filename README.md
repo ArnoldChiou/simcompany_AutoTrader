@@ -10,7 +10,7 @@ AutoTrader is an automated trading system designed for SimCompanies, providing m
 - `config.py`: Centralized configuration file for API URLs, product settings, and thresholds.
 - `main.py`: Entry point for running the application, offering options for login and auto-buying.
 - `.env`: Stores sensitive information like session IDs and user data directory paths.
-- `successful_trade.txt`: Logs successful trades for record-keeping.
+- `record/successful_trade.txt`: Logs successful trades for record-keeping.
 - `requirements.txt`: Lists required Python packages.
 - `.gitignore`: Specifies files and directories to exclude from version control.
 
@@ -55,7 +55,7 @@ AutoTrader is an automated trading system designed for SimCompanies, providing m
 - **Thresholds**: Adjust `BUY_THRESHOLD_PERCENTAGE` in `config.py` to change the price threshold for purchases.
 
 ### Logs
-- Successful trades are logged in `successful_trade.txt` with details like product name, price, and quantity.
+- Successful trades are logged in `record/successful_trade.txt` with details like product name, price, and quantity.
 
 ## Troubleshooting
 - Ensure the `.env` file is correctly configured with a valid `SESSIONID`.

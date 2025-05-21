@@ -1,6 +1,6 @@
 /.env
 /__pycache__
-/successful_trade.txt
-/finish_time.txt
+/record/successful_trade.txt
+/record/finish_time.txt
 /credentials.json
 /token.json
