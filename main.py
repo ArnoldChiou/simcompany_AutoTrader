@@ -6,7 +6,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 import time
 # Import functions from production_monitor.py
-from production_monitor import get_forest_nursery_finish_time, produce_power_plant
+from production_monitor import get_forest_nursery_finish_time, produce_power_plant,monitor_all_oil_rigs_status
 
 # Import shared configurations from config.py
 from config import (
@@ -51,19 +51,25 @@ def login_to_game():
         driver.quit()
 
 if __name__ == "__main__":
-    print("Please select the function to execute:")
-    print("1. Login to game")
-    print("2. Auto-buy")
-    print("3. Monitor Forest Nursery")
-    print("4. Produce Power Plant")
-    mode = input("Enter 1, 2, 3, or 4: ").strip()
-    if mode == "1":
-        login_to_game()
-    elif mode == "2":
-        run_auto_buyer()
-    elif mode == "3":
-        get_forest_nursery_finish_time()
-    elif mode == "4":
-        produce_power_plant()
-    else:
-        print("Input error, program ended.")
+    try:
+        print("Please select the function to execute:")
+        print("1. Login to game")
+        print("2. Auto-buy")
+        print("3. Monitor Forest Nursery")
+        print("4. Produce Power Plant")
+        print("5. Monitor All Oil Rigs") # Added option 5 to the prompt
+        mode = input("Enter 1, 2, 3, 4, or 5: ").strip() # Updated input prompt
+        if mode == "1":
+            login_to_game()
+        elif mode == "2":
+            run_auto_buyer()
+        elif mode == "3":
+            get_forest_nursery_finish_time()
+        elif mode == "4":
+            produce_power_plant()
+        elif mode == "5":
+            monitor_all_oil_rigs_status()
+        else:
+            print("Input error, program ended.")
+    except KeyboardInterrupt:
+        print("\n程式被終止 (Program terminated by user).")

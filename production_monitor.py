@@ -1,103 +1,17 @@
-from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
 import os
-from dotenv import load_dotenv
 import time
 import datetime
 from dateutil import parser
 import winsound
-import base64
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
-from email.mime.text import MIMEText
-
-load_dotenv()
-
-def _initialize_driver():
-    options = webdriver.ChromeOptions()
-    user_data_dir = os.getenv("USER_DATA_DIR")
-    profile_dir = "Default"
-    options.add_argument('--no-sandbox')
-    options.add_argument('--disable-dev-shm-usage')
-    options.add_argument('--remote-debugging-port=9222')
-    options.add_experimental_option("excludeSwitches", ["enable-logging"])
-    if user_data_dir and os.path.exists(user_data_dir):
-        try:
-            options.add_argument(f"user-data-dir={user_data_dir}")
-            options.add_argument(f"--profile-directory={profile_dir}")
-            driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
-            return driver
-        except Exception as e:
-            print(f"[警告] 使用 user-data-dir 啟動 Chrome 失敗: {e}\n將改用預設 profile 啟動。")
-            options = webdriver.ChromeOptions()
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--remote-debugging-port=9222')
-            options.add_experimental_option("excludeSwitches", ["enable-logging"])
-            driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
-            return driver
-    else:
-        print("[警告] USER_DATA_DIR 未設置或不存在，將用預設 profile 啟動 Chrome。")
-        driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
-        return driver
-
-SCOPES = ['https://www.googleapis.com/auth/gmail.send']
-def get_gmail_service():
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-    service = build('gmail', 'v1', credentials=creds)
-    return service
-
-def send_email_notify(subject, body):
-    mail_to = os.getenv('MAIL_TO')
-    mail_from = os.getenv('MAIL_FROM')
-
-    if not mail_to:
-        print('[警告] .env 檔案缺少 MAIL_TO 設定，無法發送通知郵件。')
-        return
-    if not mail_from:
-        print('[警告] .env 檔案缺少 MAIL_FROM 設定，郵件中的寄件人欄位可能不會顯示預期的寄件人。')
-
-    try:
-        service = get_gmail_service()
-        message = MIMEText(body, 'plain', 'utf-8')
-        message['to'] = mail_to
-        if mail_from:
-            message['from'] = mail_from
-        message['subject'] = subject
-        
-        raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
-        create_message = {'raw': raw_message}
-        
-        send_message = (service.users().messages().send(userId="me", body=create_message).execute())
-        print(f'[通知] 郵件已發送至 {mail_to}, Message Id: {send_message["id"]}')
-    except Exception as e:
-        print(f'[錯誤] 郵件發送失敗 (Gmail API): {e}')
-        if "invalid_grant" in str(e).lower() or "token has been expired or revoked" in str(e).lower():
-            print("[提示] Gmail API 憑證可能已失效。請嘗試刪除 'token.json' 檔案後重新執行程式以重新驗證。")
-        elif "file not found" in str(e).lower() and "credentials.json" in str(e).lower():
-            print("[錯誤] 找不到 'credentials.json' 檔案。請確保該檔案與您的應用程式在同一個目錄下，並且已正確設定。")
-            print("       您可以從 Google Cloud Console 下載您的 OAuth 2.0 用戶端憑證。")
+from driver_utils import initialize_driver
+from email_utils import send_email_notify
 
 def get_forest_nursery_finish_time():
-    driver = _initialize_driver()
+    driver = initialize_driver()  # Use the new utility function
     base_url = "https://www.simcompanies.com"
     target_paths = [
         "/b/43694783/",
@@ -289,7 +203,7 @@ def produce_power_plant():
     """
     自動點擊 Power plant 並啟動 24h 生產。
     """
-    driver = _initialize_driver()
+    driver = initialize_driver()  # Use the new utility function
     finish_times = []  # 新增：收集所有完成時間
     base_url = "https://www.simcompanies.com"
     try:
@@ -387,7 +301,7 @@ def monitor_all_oil_rigs_status():
     while True:
         driver = None
         try:
-            driver = _initialize_driver()
+            driver = initialize_driver()  # Use the new utility function
             print(f"正在進入 {landscape_url} 並搜尋所有 Oil Rig...")
             driver.get(landscape_url)
             WebDriverWait(driver, 30).until(
@@ -512,9 +426,8 @@ if __name__ == "__main__":
     elif choice == "3":
         monitor_all_oil_rigs_status()
     elif choice == "4":
-        send_email_notify(
-                subject="SimCompany 測試郵件",
-                body="這是一封測試郵件。"
-            )
+        test_subject = "SimCompanies 自動化工具測試郵件"
+        test_body = "這是一封來自 SimCompanies 自動化工具的測試郵件。\n\n如果您收到此郵件，表示郵件功能設定正確。"
+        send_email_notify(test_subject, test_body)
     else:
         print("無效選項，程式結束。")
