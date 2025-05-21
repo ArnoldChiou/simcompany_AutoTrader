@@ -377,19 +377,144 @@ def produce_power_plant():
         print("所有建築皆無需等待或時間解析失敗。")
         produce_power_plant()
 
+def monitor_all_oil_rigs_status():
+    """
+    進入 landscape 頁面，自動抓取所有 Oil Rig 建築，依序檢查是否在建設中。
+    若有在建設中則等待最早完成時間後自動再檢查，否則寄信通知並結束。
+    """
+    base_url = "https://www.simcompanies.com"
+    landscape_url = f"{base_url}/landscape/"
+    while True:
+        driver = None
+        try:
+            driver = _initialize_driver()
+            print(f"正在進入 {landscape_url} 並搜尋所有 Oil Rig...")
+            driver.get(landscape_url)
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.TAG_NAME, "a"))
+            )
+            time.sleep(2)  # 確保所有建築都載入
+            oilrig_links = []
+            a_tags = driver.find_elements(By.TAG_NAME, "a")
+            for a in a_tags:
+                try:
+                    if 'href' in a.get_attribute('outerHTML'):
+                        span_texts = a.text
+                        if "Oil rig" in span_texts:
+                            href = a.get_attribute('href')
+                            if href and "/b/" in href:
+                                oilrig_links.append(href)
+                except Exception:
+                    continue
+            if not oilrig_links:
+                print("找不到任何 Oil Rig 建築。")
+                send_email_notify(
+                    subject="SimCompany Oil Rig 監控異常",
+                    body="在 landscape 頁面找不到任何 Oil Rig 建築，請手動檢查。"
+                )
+                return
+            print(f"共找到 {len(oilrig_links)} 個 Oil Rig：")
+            for link in oilrig_links:
+                print(link)
+            # 依序檢查每個 Oil Rig
+            min_wait_seconds = None
+            min_finish_url = None
+            all_not_under_construction = True
+            for oilrig_url in oilrig_links:
+                print(f"\n檢查 Oil Rig: {oilrig_url}")
+                driver.get(oilrig_url)
+                now_for_parsing = datetime.datetime.now()
+                try:
+                    WebDriverWait(driver, 15).until(
+                        EC.presence_of_element_located((By.TAG_NAME, "body"))
+                    )
+                    try:
+                        WebDriverWait(driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
+                        )
+                        # 施工中
+                        all_not_under_construction = False
+                        try:
+                            finish_time_p = driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                            finish_time_str_raw = finish_time_p.text.strip()
+                            finish_time_str = finish_time_str_raw.replace('Finishes at', '').strip()
+                            print(f"Oil Rig 正在施工中，預計完成時間: {finish_time_str}")
+                            finish_dt = parser.parse(finish_time_str)
+                            wait_seconds_construction = (finish_dt - now_for_parsing).total_seconds()
+                            if wait_seconds_construction > 0:
+                                print(f"將於 {wait_seconds_construction:.0f} 秒後 ({finish_dt.strftime('%Y-%m-%d %H:%M:%S')}) 重新檢查 {oilrig_url}")
+                                if min_wait_seconds is None or wait_seconds_construction < min_wait_seconds:
+                                    min_wait_seconds = wait_seconds_construction
+                                    min_finish_url = oilrig_url
+                                continue
+                            else:
+                                print(f"施工已於 {finish_dt.strftime('%Y-%m-%d %H:%M:%S')} 完成或已過期。")
+                                send_email_notify(
+                                    subject="SimCompany Oil Rig 施工完成通知",
+                                    body=f"Oil Rig ({oilrig_url}) 建築施工已於 {finish_dt.strftime('%Y-%m-%d %H:%M:%S')} 完成，請前往檢查。"
+                                )
+                        except Exception as e_time:
+                            print(f"找不到預計完成時間: {e_time}")
+                            send_email_notify(
+                                subject="SimCompany Oil Rig 施工狀態異常",
+                                body=f"Oil Rig ({oilrig_url}) 顯示正在施工，但無法解析預計完成時間。請前往檢查。"
+                            )
+                    except TimeoutException:
+                        print(f"Oil Rig ({oilrig_url}) 未在施工中。")
+                        send_email_notify(
+                            subject="SimCompany Oil Rig 狀態通知",
+                            body=f"Oil Rig ({oilrig_url}) 目前未在施工中，請前往檢查。"
+                        )
+                except Exception as e:
+                    print(f"檢查 Oil Rig ({oilrig_url}) 狀態時發生錯誤: {e}")
+                    send_email_notify(
+                        subject="SimCompany Oil Rig 監控錯誤",
+                        body=f"檢查 Oil Rig ({oilrig_url}) 狀態時發生錯誤: {e}。請手動檢查。"
+                    )
+            if all_not_under_construction:
+                print("所有 Oil Rig 均未在施工中，監控結束。")
+                return
+            if min_wait_seconds and min_wait_seconds > 0:
+                print(f"\n等待 {min_wait_seconds:.0f} 秒後 (最早完成: {min_finish_url}) 重新檢查所有 Oil Rig...")
+                for _ in range(3):
+                    winsound.Beep(1000, 300)
+                    time.sleep(0.3)
+                if driver:
+                    driver.quit()
+                    driver = None
+                try:
+                    time.sleep(min_wait_seconds)
+                except KeyboardInterrupt:
+                    print("\n[中斷] 等待 Oil Rig 施工完成期間被手動中斷，安全結束。")
+                    return
+                continue  # 重新進入 while True
+            else:
+                print("無明確等待時間，監控結束。")
+                return
+        finally:
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+
 if __name__ == "__main__":
     print("請選擇要執行的功能：")
     print("1. 監控 Forest nursery 生產結束時間")
     print("2. 批次自動啟動 Power plant 24h 生產循環")
-    choice = input("請輸入數字 (1/2)：").strip()
+    print("3. 監控所有 Oil Rig 施工狀態 (自動抓 landscape)")
+    print("4. 發送測試郵件")
+    choice = input("請輸入數字 (1/2/3/4)：").strip()
     if choice == "1":
         get_forest_nursery_finish_time()
     elif choice == "2":
         produce_power_plant()
     elif choice == "3":
+        monitor_all_oil_rigs_status()
+    elif choice == "4":
         send_email_notify(
-                subject="SimCompany 施工完成通知",
-                body=f"建築施工已於完成，請前往檢查。"
+                subject="SimCompany 測試郵件",
+                body="這是一封測試郵件。"
             )
     else:
         print("無效選項，程式結束。")
