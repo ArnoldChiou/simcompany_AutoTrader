@@ -14,20 +14,23 @@ SCOPES = ['https://www.googleapis.com/auth/gmail.send']
 
 def get_gmail_service():
     creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    # Ensure 'secret' directory exists at the project root or adjust path as needed
+    token_path = 'secret/token.json'
+    credentials_path = 'secret/credentials.json'
+
+    if os.path.exists(token_path):
+        creds = Credentials.from_authorized_user_file(token_path, SCOPES)
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            # Ensure 'credentials.json' is present for the flow
-            if not os.path.exists('credentials.json'):
-                print("[錯誤] 'credentials.json' 檔案未找到。請從 Google Cloud Console 下載。")
-                raise FileNotFoundError("'credentials.json' not found. Please download it from Google Cloud Console.")
+            if not os.path.exists(credentials_path):
+                print(f"[錯誤] '{credentials_path}' 檔案未找到。請從 Google Cloud Console 下載。")
+                raise FileNotFoundError(f"'{credentials_path}' not found. Please download it from Google Cloud Console.")
             flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
+                credentials_path, SCOPES)
             creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
     service = build('gmail', 'v1', credentials=creds)
     return service
@@ -39,9 +42,6 @@ def send_email_notify(subject, body):
     if not mail_to:
         print('[警告] .env 檔案缺少 MAIL_TO 設定，無法發送通知郵件。')
         return
-    if not mail_from:
-        print('[警告] .env 檔案缺少 MAIL_FROM 設定，郵件中的寄件人欄位可能不會顯示預期的寄件人。')
-
     try:
         service = get_gmail_service()
         message = MIMEText(body, 'plain', 'utf-8')
