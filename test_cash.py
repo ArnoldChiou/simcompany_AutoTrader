@@ -1,14 +1,20 @@
 from market_utils import get_current_money
-from config import COOKIES, CASH_API_URL, MARKET_HEADERS, MONEY_REQUEST_TIMEOUT
-import requests
+from driver_utils import initialize_driver
 
 def test_get_current_money():
-    session = requests.Session()
-    cash = get_current_money(session, COOKIES, CASH_API_URL, MARKET_HEADERS, MONEY_REQUEST_TIMEOUT)
-    if cash is not None:
-        print(f"Successfully obtained cash value: {cash}")
-    else:
-        print("Unable to obtain cash value, please check API or settings.")
+    driver = None  # Initialize driver to None for the finally block
+    try:
+        driver = initialize_driver() # Initialize the Selenium driver
+        cash = get_current_money(driver)
+        if cash is not None:
+            print(f"Successfully obtained cash value: {cash}")
+        else:
+            print("Unable to obtain cash value, please check Selenium setup or website structure.")
+    except Exception as e:
+        print(f"An error occurred during the test: {e}")
+    finally:
+        if driver:
+            driver.quit() # Ensure the driver is closed
 
 if __name__ == "__main__":
     test_get_current_money()

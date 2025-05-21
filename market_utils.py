@@ -1,6 +1,10 @@
 import requests
 import json
 import traceback
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import re
 
 def get_market_data(session, api_url, target_quality, timeout=20, return_order_detail=False):
     print(f"--- Start processing Q{target_quality} market data (API: {api_url}) ---")
@@ -73,41 +77,27 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
         traceback.print_exc()
         return None
 
-def get_current_money(session, cookies, cash_api_url, market_headers, money_request_timeout):
-    url = cash_api_url
+def get_current_money(driver, landscape_url="https://www.simcompanies.com/landscape/"):
     try:
-        session_to_use = session if session.cookies else requests.Session()
-        session_to_use.headers.update(market_headers)
-        if not session_to_use.cookies and cookies.get('sessionid'):
-            session_to_use.cookies.update(cookies)
-
-        response = session_to_use.get(url, timeout=money_request_timeout)
-        response.raise_for_status()
-        data = response.json()
-        
-        # Extract the 'money' field from the response
-        money_data = data.get("money")
-        if money_data is not None:
-            print(f"Account cash obtained (API): {money_data}")
-            return money_data
+        print(f"Navigating to {landscape_url}...")
+        driver.get(landscape_url)
+        # Wait for the money element to be present and visible
+        money_element = WebDriverWait(driver, 20).until(
+            EC.visibility_of_element_located((By.ID, "js-animation-money"))
+        )
+        money_text = money_element.text
+        # Extract the numerical value using regex, removing $ and commas
+        match = re.search(r"\$([\d,]+\.?\d*)", money_text)
+        if match:
+            cash_value_str = match.group(1).replace(",", "")
+            cash_value = float(cash_value_str)
+            print(f"Account cash obtained (Selenium): {cash_value}")
+            return cash_value
         else:
-            print("Warning: Expected cash field not found in API response.")
-            print(f"API Response sample: {str(data)[:200]}...")
+            print("Warning: Could not extract cash value from element.")
+            print(f"Element text: {money_text}")
             return None
-    except requests.exceptions.Timeout:
-        print(f"Request timed out while obtaining account cash ({url}).")
-        return None
-    except requests.exceptions.RequestException as e:
-        print(f"Request error occurred while obtaining account cash ({url}): {e}")
-        if e.response is not None:
-            print(f"Full response content: {e.response.text[:500]}...")
-        return None
-    except json.JSONDecodeError as e:
-        print(f"Failed to parse JSON while obtaining account cash ({url}): {e}")
-        if response is not None:
-            print(f"Response content: {response.text[:500]}...")
-        return None
     except Exception as e:
-        print(f"Unexpected error occurred while obtaining account cash:")
+        print(f"Unexpected error occurred while obtaining account cash via Selenium:")
         traceback.print_exc()
         return None

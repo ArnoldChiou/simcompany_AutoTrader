@@ -2,6 +2,9 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
 import os
+from dotenv import load_dotenv # Import load_dotenv
+
+load_dotenv() # Load environment variables from .env file
 
 def initialize_driver(user_data_dir_env_var="USER_DATA_DIR", profile_dir="Default"):
     """
