@@ -164,6 +164,9 @@ def get_forest_nursery_finish_time():
             print("所有偵測到的施工均已過期或完成，立即重新執行檢查...")
             get_forest_nursery_finish_time()
             return
+
+    min_wait_production = None
+    min_path_production = None
     for path, finish_time_str_prod in production_finish_times:
         try:
             finish_dt_prod = parser.parse(finish_time_str_prod)
@@ -201,7 +204,7 @@ def get_forest_nursery_finish_time():
 
 def produce_power_plant():
     """
-    自動點擊 Power plant 並啟動 24h 生產（多分頁並行）。
+    先檢查每個 Power plant 是否生產中，若生產中則抓取完成時間，否則自動啟動 24h 生產。
     """
     driver = initialize_driver()  # Use the new utility function
     finish_times = []  # 收集所有完成時間
@@ -231,10 +234,28 @@ def produce_power_plant():
             time.sleep(0.2)
         # 取得所有分頁 handle
         handles = driver.window_handles
-        # 依序切換分頁並執行啟動/檢查
+        # 依序切換分頁並執行檢查/啟動
         for idx, handle in enumerate(handles):
             driver.switch_to.window(handle)
             time.sleep(0.5)
+            # 先檢查是否已在生產中
+            is_producing = False
+            finish_time = None
+            try:
+                # 檢查是否有 Finishes at
+                p_tags = driver.find_elements(By.TAG_NAME, 'p')
+                for p in p_tags:
+                    if p.text.strip().startswith('Finishes at'):
+                        finish_time = p.text.strip()
+                        is_producing = True
+                        break
+            except Exception:
+                pass
+            if is_producing:
+                print(f"{target_paths[idx]} 已在生產中，完成時間: {finish_time}")
+                finish_times.append(finish_time)
+                continue
+            # 沒有生產中則自動啟動 24h 生產
             try:
                 btn_24h = WebDriverWait(driver, 5).until(
                     EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]") )
@@ -246,9 +267,8 @@ def produce_power_plant():
                 btn_produce.click()
                 print(f"{target_paths[idx]} 已自動啟動 24h 生產！")
             except Exception:
-                print(f"{target_paths[idx]} 已在生產中，略過。嘗試抓取完成時間...")
+                print(f"{target_paths[idx]} 啟動生產失敗或已在生產中。嘗試再次抓取完成時間...")
                 try:
-                    finish_time = None
                     p_tags = driver.find_elements(By.TAG_NAME, 'p')
                     for p in p_tags:
                         if p.text.strip().startswith('Finishes at'):
@@ -407,8 +427,11 @@ def monitor_all_oil_rigs_status():
                                 if abundance_value < 95:
                                     print(f"Abundance 低於95，自動點擊Rebuild...")
                                     try:
-                                        # 先嘗試等待Rebuild按鈕可點擊
+                                        # 等待Rebuild按鈕可見且可點擊
                                         rebuild_btn = WebDriverWait(driver, 10).until(
+                                            EC.visibility_of_element_located((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
+                                        )
+                                        WebDriverWait(driver, 10).until(
                                             EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                                         )
                                         rebuild_btn.click()
