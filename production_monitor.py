@@ -433,12 +433,34 @@ def monitor_all_oil_rigs_status():
                                         WebDriverWait(driver, 10).until(
                                             EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                                         )
+                                        # 若URL已變更，則用 driver.current_url 作為新的 oilrig_url 進行後續操作
+                                        current_oilrig_url = driver.current_url
                                         rebuild_btn.click()
                                         print("已點擊Rebuild，等待施工開始...")
-                                        # 等待施工header出現
-                                        WebDriverWait(driver, 10).until(
-                                            EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
-                                        )
+                                        # 新增: 偵測是否被導回 landscape 頁面，若是則重新取得目前URL再重試
+                                        max_retries = 3
+                                        for retry in range(max_retries):
+                                            # 若被導回 landscape，需重新取得目前 driver.current_url 作為新的 oilrig_url
+                                            if driver.current_url.rstrip('/') == landscape_url.rstrip('/'):
+                                                print(f"偵測到頁面被導回 landscape，無法自動取得新URL，放棄本次操作。")
+                                                if retry == max_retries - 1:
+                                                    raise Exception("Rebuild後被導回 landscape，且無法自動取得新URL。請手動檢查。")
+                                                time.sleep(2)
+                                                continue
+                                            
+                                            try:
+                                                WebDriverWait(driver, 10).until(
+                                                    EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
+                                                )
+                                                break  # 成功進入施工頁面，跳出重試
+                                            except Exception:
+                                                if retry == max_retries - 1:
+                                                    print(f"多次重試後仍無法進入施工頁面，放棄本次操作。")
+                                                    raise
+                                                else:
+                                                    print(f"重試進入施工頁面 (第 {retry+1} 次)...")
+                                                    driver.get(current_oilrig_url)
+                                                    time.sleep(2)
                                         # 再抓施工完成時間
                                         try:
                                             finish_time_p = driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
@@ -448,17 +470,17 @@ def monitor_all_oil_rigs_status():
                                             finish_dt = parser.parse(finish_time_str)
                                             wait_seconds_construction = (finish_dt - now_for_parsing).total_seconds()
                                             if wait_seconds_construction > 0:
-                                                print(f"將於 {wait_seconds_construction:.0f} 秒後 ({finish_dt.strftime('%Y-%m-%d %H:%M:%S')}) 重新檢查 {oilrig_url}")
+                                                print(f"將於 {wait_seconds_construction:.0f} 秒後 ({finish_dt.strftime('%Y-%m-%d %H:%M:%S')}) 重新檢查 {current_oilrig_url}")
                                                 if min_wait_seconds is None or wait_seconds_construction < min_wait_seconds:
                                                     min_wait_seconds = wait_seconds_construction
-                                                    min_finish_url = oilrig_url
+                                                    min_finish_url = current_oilrig_url
                                                 all_not_under_construction = False
                                                 continue
                                         except Exception as e_time2:
                                             print(f"Rebuild後找不到預計完成時間: {e_time2}")
                                             send_email_notify(
                                                 subject="SimCompany Oil Rig Rebuild後施工狀態異常",
-                                                body=f"Oil Rig ({oilrig_url}) Rebuild後無法解析預計完成時間。請前往檢查。"
+                                                body=f"Oil Rig ({current_oilrig_url}) Rebuild後無法解析預計完成時間。請前往檢查。"
                                             )
                                     except Exception as e_rebuild:
                                         print(f"Rebuild按鈕操作失敗: {e_rebuild}")
