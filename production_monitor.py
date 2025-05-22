@@ -395,7 +395,6 @@ def monitor_all_oil_rigs_status():
                             finish_dt = parser.parse(finish_time_str)
                             wait_seconds_construction = (finish_dt - now_for_parsing).total_seconds()
                             if wait_seconds_construction > 0:
-                                print(f"將於 {wait_seconds_construction:.0f} 秒後 ({finish_dt.strftime('%Y-%m-%d %H:%M:%S')}) 重新檢查 {oilrig_url}")
                                 if min_wait_seconds is None or wait_seconds_construction < min_wait_seconds:
                                     min_wait_seconds = wait_seconds_construction
                                     min_finish_url = oilrig_url
