@@ -486,11 +486,14 @@ def monitor_all_oil_rigs_status():
                 wait_duration = min_wait_seconds_construction + 60
                 print(f"\n至少一個 Oil Rig 正在施工中。等待 {wait_duration:.0f} 秒後 (基於最早完成: {min_finish_url_construction}，加60秒緩衝) 重新檢查所有 Oil Rig...")
                 try:
+                    if driver:  # Check if driver is not None before quitting
+                        driver.quit()
+                        driver = None  # Set driver to None after quitting
                     time.sleep(wait_duration)
                 except KeyboardInterrupt:
                     print("\n[中斷] 等待 Oil Rig 施工完成期間被手動中斷，安全結束。")
-                    return
-                continue
+                    return  # driver is None here, finally block will correctly skip quitting
+                continue  # Restart the main `while True` loop (driver is None)
             else:
                 print("所有偵測到的施工均已完成/過期，或無明確未來等待時間。監控結束此輪。")
                 return
