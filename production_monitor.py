@@ -9,6 +9,7 @@ from dateutil import parser
 import winsound
 from driver_utils import initialize_driver
 from email_utils import send_email_notify
+import re
 
 def get_forest_nursery_finish_time():
     driver = initialize_driver()  # Use the new utility function
@@ -320,25 +321,29 @@ def monitor_all_oil_rigs_status():
     """
     進入 landscape 頁面，自動抓取所有 Oil Rig 建築，依序檢查是否在建設中。
     若有在建設中則等待最早完成時間後自動再檢查，否則寄信通知並結束。
+    若有需要Rebuild的則自動Rebuild並重新開始監控。
     """
     base_url = "https://www.simcompanies.com"
     landscape_url = f"{base_url}/landscape/"
+    
     while True:
         driver = None
+        action_taken_requires_restart_after_rebuild = False 
         try:
-            driver = initialize_driver()  # Use the new utility function
+            print("Initializing WebDriver for oil rig monitoring...")
+            driver = initialize_driver()
             print(f"正在進入 {landscape_url} 並搜尋所有 Oil Rig...")
             driver.get(landscape_url)
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located((By.TAG_NAME, "a"))
             )
             time.sleep(5)  # 確保所有建築都載入
+            
             oilrig_links = []
             a_tags = driver.find_elements(By.TAG_NAME, "a")
             for a in a_tags:
                 try:
                     if 'href' in a.get_attribute('outerHTML'):
-                        # 先檢查img的alt屬性
                         imgs = a.find_elements(By.TAG_NAME, "img")
                         found_oilrig = False
                         for img in imgs:
@@ -346,7 +351,6 @@ def monitor_all_oil_rigs_status():
                             if alt and 'Oil rig' in alt:
                                 found_oilrig = True
                                 break
-                        # 或span內文字
                         if not found_oilrig:
                             spans = a.find_elements(By.TAG_NAME, "span")
                             for span in spans:
@@ -357,8 +361,13 @@ def monitor_all_oil_rigs_status():
                             href = a.get_attribute('href')
                             if href and "/b/" in href:
                                 oilrig_links.append(href)
-                except Exception:
+                except StaleElementReferenceException:
+                    print("StaleElementReferenceException encountered while finding oil rig links. Retrying link collection for current page.")
+                    continue 
+                except Exception as e_find_link:
+                    print(f"Error processing a link element: {e_find_link}")
                     continue
+
             if not oilrig_links:
                 print("找不到任何 Oil Rig 建築。")
                 send_email_notify(
@@ -366,14 +375,19 @@ def monitor_all_oil_rigs_status():
                     body="在 landscape 頁面找不到任何 Oil Rig 建築，請手動檢查。"
                 )
                 return
+
             print(f"共找到 {len(oilrig_links)} 個 Oil Rig：")
             for link in oilrig_links:
                 print(link)
-            # 依序檢查每個 Oil Rig
-            min_wait_seconds = None
-            min_finish_url = None
-            all_not_under_construction = True
+
+            min_wait_seconds_construction = None
+            min_finish_url_construction = None
+            all_rigs_not_under_construction = True
+
             for oilrig_url in oilrig_links:
+                if action_taken_requires_restart_after_rebuild:
+                    break
+
                 print(f"\n檢查 Oil Rig: {oilrig_url}")
                 driver.get(oilrig_url)
                 now_for_parsing = datetime.datetime.now()
@@ -385,47 +399,38 @@ def monitor_all_oil_rigs_status():
                         WebDriverWait(driver, 10).until(
                             EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
                         )
-                        # 施工中
-                        all_not_under_construction = False
-                        try:
-                            finish_time_p = driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-                            finish_time_str_raw = finish_time_p.text.strip()
-                            finish_time_str = finish_time_str_raw.replace('Finishes at', '').strip()
+                        all_rigs_not_under_construction = False
+                        finish_time_p = driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                        finish_time_str_raw = finish_time_p.text.strip()
+                        finish_time_str = finish_time_str_raw.replace('Finishes at', '').strip()
+                        
+                        finish_dt = parser.parse(finish_time_str)
+                        current_wait_seconds = (finish_dt - now_for_parsing).total_seconds()
+
+                        if current_wait_seconds > 0:
                             print(f"Oil Rig 正在施工中，預計完成時間: {finish_time_str}")
-                            finish_dt = parser.parse(finish_time_str)
-                            wait_seconds_construction = (finish_dt - now_for_parsing).total_seconds()
-                            if wait_seconds_construction > 0:
-                                if min_wait_seconds is None or wait_seconds_construction < min_wait_seconds:
-                                    min_wait_seconds = wait_seconds_construction
-                                    min_finish_url = oilrig_url
-                                continue
-                            else:
-                                print(f"施工已於 {finish_dt.strftime('%Y-%m-%d %H:%M:%S')} 完成或已過期。")
-                                send_email_notify(
-                                    subject="SimCompany Oil Rig 施工完成通知",
-                                    body=f"Oil Rig ({oilrig_url}) 建築施工已於 {finish_dt.strftime('%Y-%m-%d %H:%M:%S')} 完成，請前往檢查。"
-                                )
-                        except Exception as e_time:
-                            print(f"找不到預計完成時間: {e_time}")
+                            if min_wait_seconds_construction is None or current_wait_seconds < min_wait_seconds_construction:
+                                min_wait_seconds_construction = current_wait_seconds
+                                min_finish_url_construction = oilrig_url
+                            continue
+                        else:
+                            print(f"施工已於 {finish_dt.strftime('%Y-%m-%d %H:%M:%S')} 完成或已過期。")
                             send_email_notify(
-                                subject="SimCompany Oil Rig 施工狀態異常",
-                                body=f"Oil Rig ({oilrig_url}) 顯示正在施工，但無法解析預計完成時間。請前往檢查。"
+                                subject="SimCompany Oil Rig 施工完成通知",
+                                body=f"Oil Rig ({oilrig_url}) 建築施工已於 {finish_dt.strftime('%Y-%m-%d %H:%M:%S')} 完成，請前往檢查。"
                             )
                     except TimeoutException:
-                        # 未在施工中，抓取Abundance
                         print(f"Oil Rig ({oilrig_url}) 未在施工中，檢查豐富率...")
                         try:
                             abundance_span = driver.find_element(By.XPATH, "//span[contains(text(), 'Abundance:')]")
                             abundance_text = abundance_span.text
                             print(f"Abundance info: {abundance_text}")
-                            import re
                             match = re.search(r'Abundance:\s*([\d.]+)', abundance_text)
                             abundance_value = float(match.group(1)) if match else None
                             if abundance_value is not None:
                                 print(f"Crude Oil Abundance: {abundance_value}")
                                 if abundance_value < 95:
                                     print(f"Abundance 低於95，自動點擊Rebuild...")
-                                    # 等待Rebuild按鈕可見且可點擊
                                     rebuild_btn = WebDriverWait(driver, 10).until(
                                         EC.visibility_of_element_located((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                                     )
@@ -435,13 +440,13 @@ def monitor_all_oil_rigs_status():
                                     rebuild_btn.click()
                                     print("已點擊Rebuild，等待施工開始...")
                                     time.sleep(5)
-                                    driver.quit()
-                                    monitor_all_oil_rigs_status()
+                                    action_taken_requires_restart_after_rebuild = True
+                                    break
                                 else:
                                     print(f"Abundance >= 95，無需Rebuild。")
                                     send_email_notify(
                                         subject="SimCompany Oil Rig 狀態通知",
-                                        body=f"Oil Rig ({oilrig_url}) 目前未在施工中，Abundance={abundance_value}，請前往檢查。"
+                                        body=f"Oil Rig ({oilrig_url}) 目前未在施工中，Abundance={abundance_value}，無需Rebuild。"
                                     )
                             else:
                                 print("無法解析Abundance數值。")
@@ -455,35 +460,59 @@ def monitor_all_oil_rigs_status():
                                 subject="SimCompany Oil Rig 狀態異常",
                                 body=f"Oil Rig ({oilrig_url}) 目前未在施工中，且抓取Abundance失敗: {e_abun}，請前往檢查。"
                             )
-                except Exception as e:
-                    print(f"檢查 Oil Rig ({oilrig_url}) 狀態時發生錯誤: {e}")
+                    except Exception as e_time_or_constr:
+                        print(f"檢查 Oil Rig ({oilrig_url}) 施工狀態時發生錯誤: {e_time_or_constr}")
+                        send_email_notify(
+                            subject="SimCompany Oil Rig 施工狀態異常",
+                            body=f"Oil Rig ({oilrig_url}) 檢查施工狀態時發生錯誤: {e_time_or_constr}。請前往檢查。"
+                        )
+                except Exception as e_rig_processing:
+                    print(f"處理 Oil Rig ({oilrig_url}) 時發生錯誤: {e_rig_processing}")
                     send_email_notify(
                         subject="SimCompany Oil Rig 監控錯誤",
-                        body=f"檢查 Oil Rig ({oilrig_url}) 狀態時發生錯誤: {e}。請手動檢查。"
+                        body=f"處理 Oil Rig ({oilrig_url}) 時發生錯誤: {e_rig_processing}。請手動檢查。"
                     )
-            if all_not_under_construction:
-                print("所有 Oil Rig 均未在施工中，監控結束。")
+
+            if action_taken_requires_restart_after_rebuild:
+                print("\nRebuild action initiated for an oil rig. Restarting monitoring process after a 60s delay.")
+                time.sleep(60) 
+                continue
+
+            if all_rigs_not_under_construction:
+                print("所有 Oil Rig 均未在施工中，且無需Rebuild。監控結束。")
                 return
-            if min_wait_seconds and min_wait_seconds > 0:
-                print(f"\n等待 {min_wait_seconds:.0f} 秒後 (最早完成: {min_finish_url}) 重新檢查所有 Oil Rig...")
-                if driver:
-                    driver.quit()
-                    driver = None
+
+            if min_wait_seconds_construction and min_wait_seconds_construction > 0:
+                wait_duration = min_wait_seconds_construction + 60
+                print(f"\n至少一個 Oil Rig 正在施工中。等待 {wait_duration:.0f} 秒後 (基於最早完成: {min_finish_url_construction}，加60秒緩衝) 重新檢查所有 Oil Rig...")
                 try:
-                    time.sleep(min_wait_seconds+60)
+                    time.sleep(wait_duration)
                 except KeyboardInterrupt:
                     print("\n[中斷] 等待 Oil Rig 施工完成期間被手動中斷，安全結束。")
                     return
-                continue  # 重新進入 while True
+                continue
             else:
-                print("無明確等待時間，監控結束。")
+                print("所有偵測到的施工均已完成/過期，或無明確未來等待時間。監控結束此輪。")
                 return
+
+        except KeyboardInterrupt:
+            print("\n[中斷] Oil Rig 監控被手動中斷，安全結束。")
+            return
+        except Exception as e_main_loop:
+            print(f"monitor_all_oil_rigs_status 主循環發生嚴重錯誤: {e_main_loop}")
+            send_email_notify(
+                subject="SimCompany Oil Rig 監控嚴重錯誤",
+                body=f"monitor_all_oil_rigs_status 發生嚴重錯誤: {e_main_loop}。監控將在60秒後重試。"
+            )
+            time.sleep(60)
+            continue
         finally:
             if driver:
+                print("Quitting WebDriver for oil rig monitoring.")
                 try:
                     driver.quit()
-                except Exception:
-                    pass
+                except Exception as e_quit:
+                    print(f"Error quitting WebDriver: {e_quit}")
 
 if __name__ == "__main__":
     print("請選擇要執行的功能：")
