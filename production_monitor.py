@@ -101,8 +101,15 @@ def get_forest_nursery_finish_time():
                                 # Error message did NOT appear, Nurture likely succeeded or is processing normally
                                 print(f"{target_path} 已自動點擊 Max 並啟動 Nurture (未檢測到特定資源不足錯誤)！")
                                 any_nurture_started = True
-                                time.sleep(2) # Original sleep after successful nurture
-                                continue # Continue to the next target_path in the loop
+                                
+                                # After Nurture, page might redirect to /landscape.
+                                # Navigate back to the building_url to get its finish time.
+                                print(f"Nurture 成功後，重新導航至 {building_url} 以讀取完成時間。")
+                                driver.get(building_url)
+                                time.sleep(3) # Allow page to load and reflect Nurture status
+
+                                # Removed original 'time.sleep(2)' and 'continue'.
+                                # Let the code flow to the "Find production finish time" block below.
                             except Exception as e_cut_down_logic:
                                 # Other unexpected error during the "Cut down" logic
                                 print(f"{target_path} 嘗試處理 Nurture 後資源不足情況時發生意外錯誤: {e_cut_down_logic}。改為查詢預計完成時間。")
