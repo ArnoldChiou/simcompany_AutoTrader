@@ -56,20 +56,61 @@ def get_forest_nursery_finish_time():
                         EC.element_to_be_clickable((By.XPATH, "//label[contains(., 'Max') and @type='button']"))
                     )
                     max_label.click()
-                    time.sleep(0.5)
+                    time.sleep(0.5) # Give Max click a moment
                     try:
                         nurture_btn = WebDriverWait(driver, 5).until(
                            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]"))
                         )
                         if nurture_btn.is_enabled():
                             nurture_btn.click()
-                            print(f"{target_path} 已自動點擊 Max 並啟動 Nurture！")
-                            any_nurture_started = True
-                            time.sleep(2)
-                            continue
-                    except Exception:
+                            time.sleep(1) # Wait for page to update after Nurture click
+
+                            # NEW: Check for "Not enough input resources"
+                            try:
+                                error_div_xpath = "//div[contains(text(), 'Not enough input resources of quality 5 available')]"
+                                WebDriverWait(driver, 2).until( # Short timeout for the error message
+                                    EC.visibility_of_element_located((By.XPATH, error_div_xpath))
+                                )
+                                # Error message IS present
+                                print(f"{target_path} 資源不足 (品質5)，偵測到錯誤訊息。將點擊 'Cut down'。")
+                                cut_down_button_xpath = "//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"
+                                cut_down_button = WebDriverWait(driver, 5).until(
+                                    EC.element_to_be_clickable((By.XPATH, cut_down_button_xpath))
+                                )
+                                cut_down_button.click()
+                                print(f"{target_path} 已點擊第一個 'Cut down' 按鈕。")
+                                time.sleep(1) # Wait for the confirmation modal to appear
+
+                                # NEW: Click the "Cut down" button in the confirmation modal
+                                try:
+                                    confirm_cut_down_button_xpath = "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"
+                                    confirm_cut_down_button = WebDriverWait(driver, 5).until(
+                                        EC.element_to_be_clickable((By.XPATH, confirm_cut_down_button_xpath))
+                                    )
+                                    confirm_cut_down_button.click()
+                                    print(f"{target_path} 已點擊確認視窗中的 'Cut down' 按鈕。等待3秒後重新啟動 Forest Nursery 監控。")
+                                except Exception as e_confirm_cut_down:
+                                    print(f"{target_path} 點擊確認視窗中的 'Cut down' 按鈕失敗: {e_confirm_cut_down}。可能視窗未出現或按鈕不同。")
+                                    # Proceeding to restart anyway, as the first cut down might have been enough or an alternative flow is needed.
+                                
+                                time.sleep(3)
+                                get_forest_nursery_finish_time() # Restart the whole monitoring process
+                                return # Exit current function instance
+
+                            except TimeoutException:
+                                # Error message did NOT appear, Nurture likely succeeded or is processing normally
+                                print(f"{target_path} 已自動點擊 Max 並啟動 Nurture (未檢測到特定資源不足錯誤)！")
+                                any_nurture_started = True
+                                time.sleep(2) # Original sleep after successful nurture
+                                continue # Continue to the next target_path in the loop
+                            except Exception as e_cut_down_logic:
+                                # Other unexpected error during the "Cut down" logic
+                                print(f"{target_path} 嘗試處理 Nurture 後資源不足情況時發生意外錯誤: {e_cut_down_logic}。改為查詢預計完成時間。")
+                                # Fall through to finding finish time (original behavior for Nurture failure)
+
+                    except Exception: # This is the original except for Nurture button not found/clickable
                         print(f"{target_path} 找不到可點擊的 Nurture 按鈕，改為查詢預計完成時間。")
-                except Exception:
+                except Exception: # This is the original except for Max button not found
                     print(f"{target_path} 找不到 Max 按鈕，改為查詢預計完成時間。")
 
                 # Find production finish time
@@ -80,7 +121,7 @@ def get_forest_nursery_finish_time():
                     for h3_tag in h3s_tags:
                         if h3_tag.text.strip().upper() == 'PROJECTED STAGE':
                             parent = h3_tag
-                            for _ in range(5):
+                            for _ in range(5): # Try to find the encompassing div
                                 try:
                                     parent = parent.find_element(By.XPATH, './..')
                                     if parent.tag_name == 'div':
@@ -90,7 +131,8 @@ def get_forest_nursery_finish_time():
                                     break 
                             if proj_div:
                                 break
-                    if not proj_div:
+                    
+                    if not proj_div: # Fallback if direct parent search fails, try sibling
                         for h3_tag in h3s_tags:
                             if h3_tag.text.strip().upper() == 'PROJECTED STAGE':
                                 try:
@@ -104,14 +146,48 @@ def get_forest_nursery_finish_time():
                     if proj_div:
                         p_tags_in_proj = proj_div.find_elements(By.TAG_NAME, 'p')
                         for p_in_proj in p_tags_in_proj:
-                            if '/' in p_in_proj.text or ':' in p_in_proj.text:
-                                finish_time_production_str = p_in_proj.text.strip()
-                                break
+                            potential_time_str = p_in_proj.text.strip()
+                            if ('/' in potential_time_str and 
+                                ':' in potential_time_str and 
+                                any(char.isdigit() for char in potential_time_str)):
+                                try:
+                                    parser.parse(potential_time_str) # Validate if it's a parsable date
+                                    finish_time_production_str = potential_time_str
+                                    break 
+                                except (ValueError, OverflowError, TypeError):
+                                    pass # Not a valid date/time string, continue
                     
+                    # Fallback: If not found in a specific "PROJECTED STAGE" div,
+                    # search more broadly for p tags that look like a date/time,
+                    # prioritizing those near relevant headers.
                     if not finish_time_production_str:
-                        timer_spans = driver.find_elements(By.XPATH, "//span[contains(@class, 'ejaaut33') and contains(text(), ':')]")
-                        if timer_spans:
-                            finish_time_production_str = timer_spans[-1].text.strip()
+                        all_p_tags_on_page = driver.find_elements(By.TAG_NAME, 'p')
+                        for p_tag_candidate in all_p_tags_on_page:
+                            candidate_text = p_tag_candidate.text.strip()
+                            if ('/' in candidate_text and 
+                                ':' in candidate_text and 
+                                any(char.isdigit() for char in candidate_text)):
+                                try:
+                                    parser.parse(candidate_text) # Validate if it's a parsable date
+                                    # Check if this p_tag is near a relevant header
+                                    try:
+                                        parent_div_of_p = p_tag_candidate.find_element(By.XPATH, "./parent::div")
+                                        if parent_div_of_p:
+                                            try:
+                                                parent_div_of_p.find_element(By.XPATH, ".//h3[contains(translate(normalize-space(.), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'projected stage')]")
+                                                finish_time_production_str = candidate_text
+                                                break # Found a good candidate
+                                            except NoSuchElementException:
+                                                pass
+                                    except NoSuchElementException:
+                                        pass
+                                    if finish_time_production_str: # If found in this inner loop
+                                        break
+                                except (ValueError, OverflowError, TypeError):
+                                    pass # Not a valid date/time string
+                            if finish_time_production_str: # If found from any p_tag_candidate
+                                break
+
                 except Exception as e_find_time:
                     print(f"{target_path} 尋找生產完成時間時出錯: {e_find_time}")
 
