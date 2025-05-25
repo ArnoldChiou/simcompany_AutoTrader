@@ -321,6 +321,12 @@ def produce_power_plant():
         # 依序切換分頁並執行檢查/啟動
         for idx, handle in enumerate(handles):
             driver.switch_to.window(handle)
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            ) # Wait for page body to load
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
+            ) # Wait for "Reposition" button
             time.sleep(0.5)
             # 先檢查是否已在生產中
             is_producing = False
