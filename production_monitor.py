@@ -10,6 +10,7 @@ import winsound
 from driver_utils import initialize_driver
 from email_utils import send_email_notify
 import re
+import traceback
 
 def get_forest_nursery_finish_time():
     driver = initialize_driver()  # Use the new utility function
@@ -417,53 +418,164 @@ def monitor_all_oil_rigs_status():
     
     while True:
         driver = None
-        action_taken_requires_restart_after_rebuild = False 
+        action_taken_requires_restart_after_rebuild = False
         try:
             print("Initializing WebDriver for oil rig monitoring...")
             driver = initialize_driver()
+            if driver is None:
+                print("CRITICAL: Failed to initialize WebDriver after all attempts. Exiting oil rig monitoring.")
+                send_email_notify(
+                    subject="SimCompany Oil Rig Monitoring CRITICAL FAILURE",
+                    body="Could not initialize the WebDriver for oil rig monitoring. Manual intervention required."
+                )
+                return
+
             print(f"正在進入 {landscape_url} 並搜尋所有 Oil Rig...")
             driver.get(landscape_url)
             WebDriverWait(driver, 30).until(
                 EC.presence_of_element_located((By.TAG_NAME, "a"))
             )
-            time.sleep(5)  # 確保所有建築都載入
+            time.sleep(5)
             
+            try:
+                login_indicator_xpath = (
+                    "//form[@action='/login'] | " 
+                    "//a[contains(@href,'/login') and (contains(normalize-space(.), 'Login') or contains(normalize-space(.), 'Sign In'))] | " 
+                    "//button[contains(translate(normalize-space(.), 'LOGIN', 'login'), 'login') and @type='submit']" 
+                )
+                WebDriverWait(driver, 7).until( 
+                    EC.visibility_of_element_located((By.XPATH, login_indicator_xpath))
+                )
+                current_url_for_login_check = driver.current_url
+                print(f"偵測到登入頁面或登入提示 (URL: {current_url_for_login_check})。可能是因為 Chrome 設定檔切換或會話過期導致未登入。")
+                send_email_notify(
+                    subject="SimCompany Oil Rig 監控需要登入",
+                    body=f"腳本在嘗試進入 {landscape_url} 後，偵測到需要登入 (URL: {current_url_for_login_check})。\n"
+                         f"這可能是因為 Chrome 設定檔損毀/切換至預設設定檔，或會話已過期。\n"
+                         f"請手動登入 SimCompanies。腳本將在1小時後重試。"
+                )
+                print("腳本將暫停 1 小時，請在此期間登入。若要立即停止，請手動中斷腳本。")
+                if driver: driver.quit() 
+                time.sleep(3600) 
+                continue 
+            except TimeoutException:
+                print("未直接偵測到登入頁面，繼續嘗試抓取 Oil Rig 資訊。")
+            except Exception as e_login_check:
+                print(f"檢查登入狀態時發生非預期錯誤: {e_login_check}")
+
             oilrig_links = []
-            a_tags = driver.find_elements(By.TAG_NAME, "a")
-            for a in a_tags:
+            MAX_LINK_COLLECTION_ATTEMPTS = 3
+            successful_link_collection = False
+            for attempt in range(MAX_LINK_COLLECTION_ATTEMPTS):
+                print(f"嘗試收集 Oil Rig 連結 (第 {attempt + 1}/{MAX_LINK_COLLECTION_ATTEMPTS} 次)...")
                 try:
-                    if 'href' in a.get_attribute('outerHTML'):
-                        imgs = a.find_elements(By.TAG_NAME, "img")
+                    oilrig_links = [] 
+                    if landscape_url not in driver.current_url:
+                        print(f"警告: 當前 URL ({driver.current_url}) 不是預期的 landscape URL ({landscape_url})。重新導航...")
+                        driver.get(landscape_url)
+                        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "a")))
+                        time.sleep(5)
+
+                    a_tags = driver.find_elements(By.TAG_NAME, "a")
+                    print(f"找到 {len(a_tags)} 個 <a> 標籤。")
+                    
+                    current_rig_links_this_attempt = []
+                    for a in a_tags:
+                        try:
+                            _ = a.tag_name 
+                        except StaleElementReferenceException:
+                            print("偵測到過時的 <a> 標籤，將於下次嘗試重新獲取所有標籤。")
+                            raise 
+
+                        href_val = a.get_attribute('href')
+                        if not href_val or "/b/" not in href_val:
+                            continue
+
                         found_oilrig = False
-                        for img in imgs:
-                            alt = img.get_attribute('alt')
-                            if alt and 'Oil rig' in alt:
-                                found_oilrig = True
-                                break
-                        if not found_oilrig:
-                            spans = a.find_elements(By.TAG_NAME, "span")
-                            for span in spans:
-                                if 'Oil rig' in span.text:
+                        try:
+                            imgs = a.find_elements(By.TAG_NAME, "img")
+                            for img in imgs:
+                                alt = img.get_attribute('alt')
+                                if alt and 'Oil rig' in alt:
                                     found_oilrig = True
                                     break
-                        if found_oilrig:
-                            href = a.get_attribute('href')
-                            if href and "/b/" in href:
-                                oilrig_links.append(href)
-                except StaleElementReferenceException:
-                    print("StaleElementReferenceException encountered while finding oil rig links. Retrying link collection for current page.")
-                    continue 
-                except Exception as e_find_link:
-                    print(f"Error processing a link element: {e_find_link}")
-                    continue
+                        except StaleElementReferenceException: 
+                            print("查找 img 時遇到 StaleElementReferenceException，標記為需要重試。")
+                            raise 
 
-            if not oilrig_links:
-                print("找不到任何 Oil Rig 建築。")
+                        if not found_oilrig:
+                            try:
+                                spans = a.find_elements(By.TAG_NAME, "span")
+                                for span in spans:
+                                    if 'Oil rig' in span.text:
+                                        found_oilrig = True
+                                        break
+                            except StaleElementReferenceException: 
+                                print("查找 span 時遇到 StaleElementReferenceException，標記為需要重試。")
+                                raise
+                        
+                        if found_oilrig:
+                            if href_val not in current_rig_links_this_attempt:
+                                current_rig_links_this_attempt.append(href_val)
+                    
+                    oilrig_links = current_rig_links_this_attempt
+                    if not oilrig_links and len(a_tags) > 0 : 
+                        print(f"處理了 {len(a_tags)} 個<a>標籤，但未識別出 Oil Rig 連結。檢查頁面內容是否符合預期。")
+                    elif not oilrig_links and len(a_tags) == 0:
+                        print("在頁面上未找到任何 <a> 標籤可供分析。")
+
+                    print(f"成功收集到 {len(oilrig_links)} 個 Oil Rig 連結。")
+                    successful_link_collection = True
+                    break  
+
+                except StaleElementReferenceException:
+                    print(f"收集 Oil Rig 連結時遇到 StaleElementReferenceException。")
+                    if attempt < MAX_LINK_COLLECTION_ATTEMPTS - 1:
+                        print("將刷新頁面並重試...")
+                        time.sleep(3) 
+                        driver.refresh() 
+                        WebDriverWait(driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "a")))
+                        time.sleep(5) 
+                    else:
+                        print("達到最大重試次數，無法從 StaleElementReferenceException 中恢復。")
+                except Exception as e_find_link_general: 
+                    print(f"處理連結元素時發生非預期的錯誤 (嘗試 {attempt + 1}): {e_find_link_general}")
+                    traceback.print_exc()
+                    if attempt < MAX_LINK_COLLECTION_ATTEMPTS - 1:
+                        print("將於短暫延遲後重試...")
+                        time.sleep(5)
+                    else:
+                        print("達到最大重試次數，因其他錯誤無法收集連結。")
+            
+            if not successful_link_collection or not oilrig_links:
+                current_url_for_debug = driver.current_url
+                page_title_for_debug = driver.title
+                print(f"在 {landscape_url} (當前實際URL: {current_url_for_debug}, 標題: {page_title_for_debug}) 找不到任何 Oil Rig 建築。")
+                
+                screenshot_dir = 'record'
+                if not os.path.exists(screenshot_dir):
+                    os.makedirs(screenshot_dir)
+                screenshot_filename = f'no_oil_rigs_found_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.png'
+                screenshot_path = os.path.join(screenshot_dir, screenshot_filename)
+                try:
+                    driver.save_screenshot(screenshot_path)
+                    print(f"已保存截圖至: {screenshot_path}")
+                except Exception as e_ss:
+                    print(f"保存截圖失敗: {e_ss}")
+
                 send_email_notify(
-                    subject="SimCompany Oil Rig 監控異常",
-                    body="在 landscape 頁面找不到任何 Oil Rig 建築，請手動檢查。"
+                    subject="SimCompany Oil Rig 監控異常 - 未找到建築",
+                    body=f"在 landscape 頁面 ({landscape_url}) 找不到任何 Oil Rig 建築。\n"
+                         f"當前頁面 URL: {current_url_for_debug}\n"
+                         f"當前頁面標題: {page_title_for_debug}\n"
+                         f"已嘗試 {MAX_LINK_COLLECTION_ATTEMPTS} 次連結收集。\n"
+                         f"截圖已嘗試保存至伺服器的 {screenshot_path} (如果成功)。\n"
+                         f"請手動檢查是否已登入，以及 landscape 頁面是否正常顯示建築物。"
                 )
-                return
+                print("將於 1 小時後重試。") 
+                if driver: driver.quit()
+                time.sleep(3600)
+                continue 
 
             print(f"共找到 {len(oilrig_links)} 個 Oil Rig：")
             for link in oilrig_links:
@@ -471,11 +583,10 @@ def monitor_all_oil_rigs_status():
 
             min_wait_seconds_construction = None
             min_finish_url_construction = None
-            all_rigs_not_under_construction = True
 
             for oilrig_url in oilrig_links:
                 if action_taken_requires_restart_after_rebuild:
-                    break
+                    break 
 
                 print(f"\n檢查 Oil Rig: {oilrig_url}")
                 driver.get(oilrig_url)
@@ -488,7 +599,6 @@ def monitor_all_oil_rigs_status():
                         WebDriverWait(driver, 10).until(
                             EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
                         )
-                        all_rigs_not_under_construction = False
                         finish_time_p = driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
                         finish_time_str_raw = finish_time_p.text.strip()
                         finish_time_str = finish_time_str_raw.replace('Finishes at', '').strip()
@@ -566,10 +676,6 @@ def monitor_all_oil_rigs_status():
                 print("\nRebuild action initiated for an oil rig. Restarting monitoring process after a 60s delay.")
                 time.sleep(60) 
                 continue
-
-            if all_rigs_not_under_construction:
-                print("所有 Oil Rig 均未在施工中，且無需Rebuild。監控結束。")
-                return
 
             if min_wait_seconds_construction and min_wait_seconds_construction > 0:
                 wait_duration = min_wait_seconds_construction + 60
