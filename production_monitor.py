@@ -59,7 +59,7 @@ def get_forest_nursery_finish_time():
                     max_label.click()
                     time.sleep(0.5) # Give Max click a moment
                     try:
-                        nurture_btn = WebDriverWait(driver, 5).until(
+                        nurture_btn = WebDriverWait(driver, 20).until(
                            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]"))
                         )
                         if nurture_btn.is_enabled():
@@ -263,12 +263,9 @@ def get_forest_nursery_finish_time():
             continue
     
     if min_wait_production and min_wait_production > 0:
-        print(f"將於 {min_wait_production:.0f} 秒後 (最早生產完成: {min_path_production}) 自動重新執行批次 Nurture/監控！")
-        for _ in range(3):
-            winsound.Beep(1000, 500)
-            time.sleep(0.5)
+        print(f"將於 {min_wait_production:.0f} +60秒後 (最早生產完成: {min_path_production}) 自動重新執行批次 Nurture/監控！")
         try:
-            time.sleep(min_wait_production)
+            time.sleep(min_wait_production + 60)
         except KeyboardInterrupt:
             print("\n[中斷] 等待生產完成期間被手動中斷，安全結束。")
             return
@@ -325,7 +322,7 @@ def produce_power_plant():
             WebDriverWait(driver, 10).until(
                 EC.presence_of_element_located((By.TAG_NAME, "body"))
             ) # Wait for page body to load
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 60).until(
                 EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
             ) # Wait for "Reposition" button
             time.sleep(0.5)
