@@ -20,15 +20,24 @@ from driver_utils import initialize_driver
 from email_utils import send_email_notify
 
 # --- Logging Setup ---
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(name)s - %(message)s',
-    handlers=[
-        logging.FileHandler("record/monitor.log", encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+def setup_logger(name, log_filename):
+    log_path = os.path.join('record', log_filename)
+    # Remove old log if exists (for fresh run)
+    if os.path.exists(log_path):
+        os.remove(log_path)
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    # Remove all old handlers
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler.setFormatter(formatter)
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    return logger
 
 # --- Constants ---
 BASE_URL = "https://www.simcompanies.com"
@@ -759,13 +768,14 @@ def main():
     print("4. Send test email")
     choice = input("Enter a number (1/2/3/4):").strip()
 
+    global logger
     if choice == "1":
-        # Define your Forest Nursery paths here
+        logger = setup_logger("production_monitor.forest", "monitor_forest.log")
         fn_paths = ["/b/43694783/"]
         monitor = ForestNurseryMonitor(fn_paths)
         monitor.run()
     elif choice == "2":
-        # Define your Power Plant paths here
+        logger = setup_logger("production_monitor.powerplant", "monitor_powerplant.log")
         pp_paths = [
             "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
             "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
@@ -774,9 +784,11 @@ def main():
         producer = PowerPlantProducer(pp_paths)
         producer.run()
     elif choice == "3":
+        logger = setup_logger("production_monitor.oilrig", "monitor_oilrig.log")
         monitor = OilRigMonitor()
         monitor.run()
     elif choice == "4":
+        logger = setup_logger("production_monitor.emailtest", "monitor_emailtest.log")
         logger.info("Sending test email...")
         send_email_notify(
             subject="SimCompanies Automation Tool Test Email",
