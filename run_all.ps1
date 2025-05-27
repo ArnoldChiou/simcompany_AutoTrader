@@ -27,6 +27,7 @@ $jobDefinitions = @(
 )
 
 foreach ($jobDef in $jobDefinitions) {
+    Write-Host "Rnning $($jobDef.name)"
     $canStart = $true
     if ($jobDef.needsSelenium) {
         $maxTries = 5
