@@ -1,3 +1,5 @@
+# Import setup_logger for per-monitor logging
+from production_monitor import setup_logger
 # Import classes
 from AutoBuyer import AutoBuyer
 import traceback
@@ -62,15 +64,15 @@ def login_to_game():
 
 # --- Functions to start monitors ---
 
-def run_forest_nursery_monitor():
+def run_forest_nursery_monitor(logger):
     """Starts the Forest Nursery monitor."""
     # --- IMPORTANT: Define your Forest Nursery paths here ---
     fn_paths = ["/b/43694783/"] # Or load from config
-    monitor = ForestNurseryMonitor(fn_paths)
+    monitor = ForestNurseryMonitor(fn_paths, logger=logger)
     monitor.run()
 
 
-def run_power_plant_producer():
+def run_power_plant_producer(logger):
     """Starts the Power Plant producer."""
     # --- IMPORTANT: Define your Power Plant paths here ---
     pp_paths = [
@@ -78,13 +80,13 @@ def run_power_plant_producer():
         "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
         "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
     ] # Or load from config
-    producer = PowerPlantProducer(pp_paths)
+    producer = PowerPlantProducer(pp_paths, logger=logger)
     producer.run()
 
 
-def run_oil_rig_monitor():
+def run_oil_rig_monitor(logger):
     """Starts the Oil Rig monitor."""
-    monitor = OilRigMonitor()
+    monitor = OilRigMonitor(logger=logger)
     monitor.run()
 
 
@@ -117,14 +119,14 @@ if __name__ == "__main__":
         elif mode == "2":
             run_auto_buyer()
         elif mode == "3":
-            # Call the new function for Forest Nursery
-            run_forest_nursery_monitor()
+            logger = setup_logger("production_monitor.forest", "monitor_forest.log")
+            run_forest_nursery_monitor(logger)
         elif mode == "4":
-            # Call the new function for Power Plant
-            run_power_plant_producer()
+            logger = setup_logger("production_monitor.powerplant", "monitor_powerplant.log")
+            run_power_plant_producer(logger)
         elif mode == "5":
-            # Call the new function for Oil Rigs
-            run_oil_rig_monitor()
+            logger = setup_logger("production_monitor.oilrig", "monitor_oilrig.log")
+            run_oil_rig_monitor(logger)
         elif mode == "exit":
             print("Program ended.")
         else:
