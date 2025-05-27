@@ -91,4 +91,4 @@ if __name__ == "__main__":
             print("Invalid selection, program ended.")
 
     except KeyboardInterrupt:
-        print("\n程式被終止 (Program terminated by user).")
+        print("\nProgram terminated by user.")
