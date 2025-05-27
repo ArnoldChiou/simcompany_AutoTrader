@@ -5,7 +5,7 @@ Remove-Item -ErrorAction SilentlyContinue "record/monitor_forest.log"
 Remove-Item -ErrorAction SilentlyContinue "record/monitor_powerplant.log"
 Remove-Item -ErrorAction SilentlyContinue "record/monitor_oilrig.log"
 
-$projectPath = "C:\Users\Arnold\simcompany_AutoTrader"
+$projectPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 # Define Wait-For-SeleniumFree function
 function Wait-For-SeleniumFree {
@@ -27,7 +27,7 @@ $jobDefinitions = @(
 )
 
 foreach ($jobDef in $jobDefinitions) {
-    Write-Host "Rnning $($jobDef.name)"
+    Write-Host "Running $($jobDef.name)"
     $canStart = $true
     if ($jobDef.needsSelenium) {
         $maxTries = 5
