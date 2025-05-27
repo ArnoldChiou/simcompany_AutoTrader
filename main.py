@@ -6,12 +6,11 @@ from selenium import webdriver
 # from selenium.webdriver.common.keys import Keys # No longer used directly here
 import time
 import inquirer # Import inquirer
-# Import NEW classes and logging from production_monitor.py
+# Import NEW classes from production_monitor.py
 from production_monitor import (
     ForestNurseryMonitor,
     PowerPlantProducer,
-    OilRigMonitor,
-    logger # Import logger to show its activity
+    OilRigMonitor
 )
 
 # Import shared configurations from config.py
@@ -65,16 +64,14 @@ def login_to_game():
 
 def run_forest_nursery_monitor():
     """Starts the Forest Nursery monitor."""
-    logger.info("Starting Forest Nursery Monitor...")
     # --- IMPORTANT: Define your Forest Nursery paths here ---
     fn_paths = ["/b/43694783/"] # Or load from config
     monitor = ForestNurseryMonitor(fn_paths)
     monitor.run()
-    logger.info("Forest Nursery Monitor finished.")
+
 
 def run_power_plant_producer():
     """Starts the Power Plant producer."""
-    logger.info("Starting Power Plant Producer...")
     # --- IMPORTANT: Define your Power Plant paths here ---
     pp_paths = [
         "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
@@ -83,14 +80,12 @@ def run_power_plant_producer():
     ] # Or load from config
     producer = PowerPlantProducer(pp_paths)
     producer.run()
-    logger.info("Power Plant Producer finished.")
+
 
 def run_oil_rig_monitor():
     """Starts the Oil Rig monitor."""
-    logger.info("Starting Oil Rig Monitor...")
     monitor = OilRigMonitor()
     monitor.run()
-    logger.info("Oil Rig Monitor finished.")
 
 
 if __name__ == "__main__":
