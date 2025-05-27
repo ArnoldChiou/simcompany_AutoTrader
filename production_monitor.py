@@ -685,7 +685,7 @@ class OilRigMonitor(BaseMonitor):
         return None
 
     def _check_and_rebuild_oilrig(self, oilrig_url):
-        """Checks abundance and triggers rebuild if below 95."""
+        """Checks abundance and triggers rebuild if below 95. Handles confirmation modal if abundance > 80%."""
         try:
             abundance_span = self.driver.find_element(By.XPATH, "//span[contains(text(), 'Abundance:')]")
             match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
@@ -702,14 +702,23 @@ class OilRigMonitor(BaseMonitor):
                     EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                 )
                 rebuild_btn.click()
-                logger.info("  Rebuild clicked, waiting for confirmation...")
-                time.sleep(2) # Wait for potential modal
-                # It's better to assume it worked and restart check,
-                # as modals can be tricky. The next cycle will confirm construction.
-                send_email_notify(
-                    subject="SimCompany Oil Rig Rebuild Notification",
-                    body=f"Oil Rig ({oilrig_url}) triggered Rebuild due to Abundance ({abundance}) being below 95."
-                )
+                logger.info("  Rebuild clicked.")
+                # 只有 abundance > 80 才需要處理確認 modal
+                if abundance > 80:
+                    logger.info("  Abundance > 80, waiting for confirmation modal...")
+                    try:
+                        modal = WebDriverWait(self.driver, 3).until(
+                            EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                        )
+                        logger.info("  Confirmation modal appeared, waiting for Rebuild button...")
+                        confirm_btn = WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
+                        )
+                        confirm_btn.click()
+                        logger.info("  Confirmation modal 'Rebuild' clicked.")
+                    except TimeoutException:
+                        logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
+                time.sleep(2) # Wait for modal to close/transition
                 return True # Rebuild initiated
             else:
                 logger.info(f"  Abundance >= 95, no Rebuild needed.")
