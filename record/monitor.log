@@ -1,0 +1,66 @@
+2025-05-27 11:11:58,743 - INFO - production_monitor - Starting Power Plant Producer...
+2025-05-27 11:11:58,743 - INFO - production_monitor - [PowerPlant] Starting production loop.
+2025-05-27 11:11:58,743 - INFO - production_monitor - [PowerPlant] Initializing WebDriver...
+2025-05-27 11:11:58,744 - INFO - WDM - ====== WebDriver manager ======
+2025-05-27 11:11:59,535 - INFO - WDM - Get LATEST chromedriver version for google-chrome
+2025-05-27 11:11:59,750 - INFO - WDM - Get LATEST chromedriver version for google-chrome
+2025-05-27 11:11:59,930 - INFO - WDM - Driver [C:\Users\Arnold\.wdm\drivers\chromedriver\win64\136.0.7103.113\chromedriver-win32/chromedriver.exe] found in cache
+2025-05-27 11:12:00,913 - INFO - production_monitor - [PowerPlant] WebDriver initialized successfully.
+2025-05-27 11:12:08,098 - INFO - production_monitor - [PowerPlant] Opened 12 tabs.
+2025-05-27 11:12:08,109 - INFO - production_monitor - [PowerPlant] Processing: /b/40253730/
+2025-05-27 11:12:08,667 - INFO - production_monitor - /b/40253730/ 已在生產中。
+2025-05-27 11:12:08,882 - INFO - production_monitor - /b/40253730/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:08,938 - INFO - production_monitor - [PowerPlant] Processing: /b/39825683/
+2025-05-27 11:12:10,071 - INFO - production_monitor - /b/39825683/ 已在生產中。
+2025-05-27 11:12:10,109 - INFO - production_monitor - /b/39825683/ 完成時間: Finishes at 5/27/2025 4:50 PM
+2025-05-27 11:12:10,122 - INFO - production_monitor - [PowerPlant] Processing: /b/39888395/
+2025-05-27 11:12:10,775 - INFO - production_monitor - /b/39888395/ 已在生產中。
+2025-05-27 11:12:10,808 - INFO - production_monitor - /b/39888395/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:10,827 - INFO - production_monitor - [PowerPlant] Processing: /b/39915579/
+2025-05-27 11:12:11,367 - INFO - production_monitor - /b/39915579/ 已在生產中。
+2025-05-27 11:12:11,393 - INFO - production_monitor - /b/39915579/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:11,405 - INFO - production_monitor - [PowerPlant] Processing: /b/43058380/
+2025-05-27 11:12:11,936 - INFO - production_monitor - /b/43058380/ 已在生產中。
+2025-05-27 11:12:11,962 - INFO - production_monitor - /b/43058380/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:11,971 - INFO - production_monitor - [PowerPlant] Processing: /b/39825725/
+2025-05-27 11:12:12,510 - INFO - production_monitor - /b/39825725/ 已在生產中。
+2025-05-27 11:12:12,546 - INFO - production_monitor - /b/39825725/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:12,564 - INFO - production_monitor - [PowerPlant] Processing: /b/39825679/
+2025-05-27 11:12:13,091 - INFO - production_monitor - /b/39825679/ 已在生產中。
+2025-05-27 11:12:13,110 - INFO - production_monitor - /b/39825679/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:13,124 - INFO - production_monitor - [PowerPlant] Processing: /b/39693844/
+2025-05-27 11:12:13,667 - INFO - production_monitor - /b/39693844/ 已在生產中。
+2025-05-27 11:12:13,701 - INFO - production_monitor - /b/39693844/ 完成時間: Finishes at 5/27/2025 4:50 PM
+2025-05-27 11:12:13,718 - INFO - production_monitor - [PowerPlant] Processing: /b/39825691/
+2025-05-27 11:12:14,252 - INFO - production_monitor - /b/39825691/ 已在生產中。
+2025-05-27 11:12:14,287 - INFO - production_monitor - /b/39825691/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:14,308 - INFO - production_monitor - [PowerPlant] Processing: /b/39825676/
+2025-05-27 11:12:14,843 - INFO - production_monitor - /b/39825676/ 已在生產中。
+2025-05-27 11:12:14,878 - INFO - production_monitor - /b/39825676/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:14,897 - INFO - production_monitor - [PowerPlant] Processing: /b/39825686/
+2025-05-27 11:12:15,432 - INFO - production_monitor - /b/39825686/ 已在生產中。
+2025-05-27 11:12:15,468 - INFO - production_monitor - /b/39825686/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:15,484 - INFO - production_monitor - [PowerPlant] Processing: /b/41178098/
+2025-05-27 11:12:16,019 - INFO - production_monitor - /b/41178098/ 已在生產中。
+2025-05-27 11:12:16,055 - INFO - production_monitor - /b/41178098/ 完成時間: Finishes at 5/27/2025 4:54 PM
+2025-05-27 11:12:16,055 - INFO - production_monitor - [PowerPlant] Quitting WebDriver.
+2025-05-27 11:12:18,369 - INFO - production_monitor - [PowerPlant] Max wait time: 20519 seconds (Until: Finishes at 5/27/2025 4:54 PM).
+2025-05-27 11:12:18,371 - INFO - production_monitor - Playing notification sound (Windows only).
+2025-05-27 11:12:21,392 - INFO - production_monitor - [PowerPlant] Next check in 20519 seconds.
+2025-05-27 11:16:00,131 - INFO - production_monitor - Starting Forest Nursery Monitor...
+2025-05-27 11:16:00,132 - INFO - production_monitor - [ForestNursery] Starting monitoring loop.
+2025-05-27 11:16:00,132 - INFO - production_monitor - [ForestNursery] Initializing WebDriver...
+2025-05-27 11:16:00,132 - INFO - WDM - ====== WebDriver manager ======
+2025-05-27 11:16:00,950 - INFO - WDM - Get LATEST chromedriver version for google-chrome
+2025-05-27 11:16:01,154 - INFO - WDM - Get LATEST chromedriver version for google-chrome
+2025-05-27 11:16:01,337 - INFO - WDM - Driver [C:\Users\Arnold\.wdm\drivers\chromedriver\win64\136.0.7103.113\chromedriver-win32/chromedriver.exe] found in cache
+2025-05-27 11:16:02,395 - INFO - production_monitor - [ForestNursery] WebDriver initialized successfully.
+2025-05-27 11:16:02,395 - INFO - production_monitor - 第一次使用請先使用python main.py login 登入，並在登入後關閉瀏覽器
+2025-05-27 11:16:02,395 - INFO - production_monitor - [ForestNursery] Checking: https://www.simcompanies.com/b/43694783/
+2025-05-27 11:16:05,963 - INFO - production_monitor - /b/43694783/ 未在施工中，檢查生產狀態...
+2025-05-27 11:16:16,858 - INFO - production_monitor - /b/43694783/ 找不到 Nurture 或 Max 按鈕，改為查詢預計完成時間。
+2025-05-27 11:16:16,920 - INFO - production_monitor - /b/43694783/ 預計生產完成時間: 5/27/2025 12:29 PM
+2025-05-27 11:16:17,922 - INFO - production_monitor - Finish times saved to record/finish_time.txt
+2025-05-27 11:16:17,923 - INFO - production_monitor - [ForestNursery] Quitting WebDriver.
+2025-05-27 11:16:20,180 - INFO - production_monitor - 最早 生產 完成時間: 2025-05-27 12:29:00，需等待 4378 秒。
+2025-05-27 11:16:20,180 - INFO - production_monitor - [ForestNursery] Next check in 4438 seconds.

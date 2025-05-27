@@ -2,12 +2,17 @@
 from AutoBuyer import AutoBuyer
 import traceback
 from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
+# from selenium.webdriver.common.by import By # No longer used directly here
+# from selenium.webdriver.common.keys import Keys # No longer used directly here
 import time
 import inquirer # Import inquirer
-# Import functions from production_monitor.py
-from production_monitor import get_forest_nursery_finish_time, produce_power_plant,monitor_all_oil_rigs_status
+# Import NEW classes and logging from production_monitor.py
+from production_monitor import (
+    ForestNurseryMonitor,
+    PowerPlantProducer,
+    OilRigMonitor,
+    logger # Import logger to show its activity
+)
 
 # Import shared configurations from config.py
 from config import (
@@ -38,38 +43,75 @@ def run_auto_buyer():
 
 def login_to_game():
     print("\nStarting login function...")
+    driver = None # Initialize driver
     try:
+        # Consider using initialize_driver from driver_utils for consistency
         driver = webdriver.Chrome()  # Use Chrome browser
         driver.get("https://www.simcompanies.com/signin/")  # Replace with the game's login page URL
 
-        print("Please log in to the game manually in the browser, then close the browser to continue...")
-        input("Press Enter to confirm login is complete: ")
-        print("Login information saved, you can continue to use the auto-buy function.")
+        print("Please log in to the game manually in the browser...")
+        # A more robust way might involve checking cookies or a specific element
+        # after login, but manual confirmation is simpler.
+        input("Press Enter after you have logged in and are ready to close the browser: ")
+        print("Login confirmed by user. Closing browser.")
     except Exception as e:
         print(f"Error occurred during login process: {e}")
         traceback.print_exc()
     finally:
-        driver.quit()
+        if driver:
+            driver.quit()
+
+# --- Functions to start monitors ---
+
+def run_forest_nursery_monitor():
+    """Starts the Forest Nursery monitor."""
+    logger.info("Starting Forest Nursery Monitor...")
+    # --- IMPORTANT: Define your Forest Nursery paths here ---
+    fn_paths = ["/b/43694783/"] # Or load from config
+    monitor = ForestNurseryMonitor(fn_paths)
+    monitor.run()
+    logger.info("Forest Nursery Monitor finished.")
+
+def run_power_plant_producer():
+    """Starts the Power Plant producer."""
+    logger.info("Starting Power Plant Producer...")
+    # --- IMPORTANT: Define your Power Plant paths here ---
+    pp_paths = [
+        "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
+        "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
+        "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
+    ] # Or load from config
+    producer = PowerPlantProducer(pp_paths)
+    producer.run()
+    logger.info("Power Plant Producer finished.")
+
+def run_oil_rig_monitor():
+    """Starts the Oil Rig monitor."""
+    logger.info("Starting Oil Rig Monitor...")
+    monitor = OilRigMonitor()
+    monitor.run()
+    logger.info("Oil Rig Monitor finished.")
+
 
 if __name__ == "__main__":
     try:
         questions = [
             inquirer.List(
                 "mode",
-                message="Please select the function to execute:",
+                message="請選擇要執行的功能:",
                 choices=[
                     ("Login to game", "1"),
                     ("Auto-buy", "2"),
                     ("Monitor Forest Nursery", "3"),
                     ("Produce Power Plant", "4"),
                     ("Monitor All Oil Rigs", "5"),
-                    ("Exit", "exit"), # Added an exit option
+                    ("Exit", "exit"),
                 ],
             ),
         ]
         answers = inquirer.prompt(questions)
 
-        if not answers: # Handle case where prompt is exited (e.g., Ctrl+C)
+        if not answers:
             print("\nNo selection made, program ended.")
             exit()
 
@@ -80,15 +122,21 @@ if __name__ == "__main__":
         elif mode == "2":
             run_auto_buyer()
         elif mode == "3":
-            get_forest_nursery_finish_time()
+            # Call the new function for Forest Nursery
+            run_forest_nursery_monitor()
         elif mode == "4":
-            produce_power_plant()
+            # Call the new function for Power Plant
+            run_power_plant_producer()
         elif mode == "5":
-            monitor_all_oil_rigs_status()
-        elif mode == "exit": # Handle the new exit option
+            # Call the new function for Oil Rigs
+            run_oil_rig_monitor()
+        elif mode == "exit":
             print("Program ended.")
-        else: # Should not happen with List prompt, but good for robustness
+        else:
             print("Invalid selection, program ended.")
 
     except KeyboardInterrupt:
         print("\nProgram terminated by user.")
+    except Exception as e:
+        print(f"\nAn unexpected error occurred in main.py: {e}")
+        traceback.print_exc()
