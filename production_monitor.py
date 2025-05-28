@@ -160,6 +160,7 @@ class ForestNurseryMonitor(BaseMonitor):
         any_nurture_started = False
         now_for_parsing = datetime.datetime.now()
         error_occurred = False
+        restart_after_cut = False  # 新增 flag
 
         try:
             self.logger.info("For first-time use, please log in using python main.py login, and close the browser after logging in.")
@@ -178,8 +179,8 @@ class ForestNurseryMonitor(BaseMonitor):
                     # Try Nurture / Cut down
                     nurture_result = self._try_nurture_or_cutdown(target_path)
                     if nurture_result == "RESTART":
-                         self._quit_driver()
-                         return 10 # Restart almost immediately after cut down
+                        restart_after_cut = True
+                        break  # 不 quit driver，直接 break
 
                     any_nurture_started = any_nurture_started or (nurture_result == "NURTURED")
 
@@ -200,12 +201,17 @@ class ForestNurseryMonitor(BaseMonitor):
 
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing interrupted by user.")
+            self._quit_driver()
             return None # Signal to stop
         except Exception as e_main:
             self.logger.critical(f"[{self.name}] Unhandled error in processing loop: {e_main}", exc_info=True)
             error_occurred = True
         finally:
-            self._quit_driver()
+            if not restart_after_cut:
+                self._quit_driver()  # 只有不是 cutdown 才 quit
+
+        if restart_after_cut:
+            return 5  # 只等 5 秒，且不 quit driver
 
         if error_occurred:
             return DEFAULT_RETRY_DELAY * 5 # Longer delay on errors
@@ -228,7 +234,6 @@ class ForestNurseryMonitor(BaseMonitor):
         self.logger.warning(f"[{self.name}] No specific event found. Retrying after default delay.")
         return DEFAULT_RETRY_DELAY * 5
 
-
     def _check_construction(self, target_path, construction_finish_times):
         """Checks if a building is under construction."""
         try:
@@ -247,7 +252,7 @@ class ForestNurseryMonitor(BaseMonitor):
             return False
 
     def _try_nurture_or_cutdown(self, target_path):
-        """Tries to click Max and Nurture, handles resource errors by cutting down."""
+        """Tries to click Max and Nurture, handles resource errors by cutting down. Also checks for 'Not enough input resources of quality 5 available' or 'Water missing' if Nurture/Max not found."""
         try:
             WebDriverWait(self.driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//label[contains(., 'Max') and @type='button']"))
@@ -286,7 +291,30 @@ class ForestNurseryMonitor(BaseMonitor):
                     return "NURTURED"
 
         except TimeoutException:
-            self.logger.info(f"{target_path} Could not find Nurture or Max button, checking expected completion time instead.")
+            self.logger.info(f"{target_path} Could not find Nurture or Max button, checking for resource errors before expected completion time.")
+            # 檢查是否有 "Not enough input resources of quality 5 available" 或 "Water missing"
+            try:
+                error_elements_5 = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Not enough input resources of quality 5 available')]")
+                error_elements_water = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Water missing')]")
+                if error_elements_5 or error_elements_water:
+                    msg = "'Not enough input resources of quality 5 available'" if error_elements_5 else "'Water missing'"
+                    self.logger.warning(f"{target_path} Detected {msg}, attempting to click 'Cut down'.")
+                    try:
+                        WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
+                        ).click()
+                        time.sleep(1)
+                        WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
+                        ).click()
+                        self.logger.info(f"{target_path} 'Cut down' clicked due to resource error. Restarting monitoring.")
+                        return "RESTART"
+                    except Exception as e:
+                        self.logger.error(f"{target_path} Failed to click 'Cut down' after resource error: {e}", exc_info=True)
+                else:
+                    self.logger.info(f"{target_path} No 'Not enough input resources of quality 5 available' or 'Water missing' message found.")
+            except Exception as e:
+                self.logger.error(f"{target_path} Error while checking for resource error: {e}", exc_info=True)
         except Exception as e:
             self.logger.error(f"Error occurred while trying Nurture/Cut down for {target_path}: {e}", exc_info=True)
         return "NONE"
