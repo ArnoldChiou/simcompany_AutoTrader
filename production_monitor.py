@@ -253,6 +253,15 @@ class ForestNurseryMonitor(BaseMonitor):
 
     def _try_nurture_or_cutdown(self, target_path):
         """Tries to click Max and Nurture, handles resource errors by cutting down. Also checks for 'Not enough input resources of quality 5 available' or 'Water missing' if Nurture/Max not found."""
+        # 先檢查是否正在生產中，若是則直接 return "NONE"
+        try:
+            # 若有 Cancel Nurturing 按鈕，代表正在生產，不應該 cut down
+            self.driver.find_element(By.XPATH, "//button[contains(., 'Cancel Nurturing') and contains(@class, 'btn-secondary')]")
+            self.logger.info(f"{target_path} is producing (Cancel Nurturing button found), skip cut down.")
+            return "NONE"
+        except NoSuchElementException:
+            pass
+
         try:
             WebDriverWait(self.driver, 5).until(
                 EC.element_to_be_clickable((By.XPATH, "//label[contains(., 'Max') and @type='button']"))
@@ -584,52 +593,61 @@ class OilRigMonitor(BaseMonitor):
 
         min_wait_seconds = None
         now_for_parsing = datetime.datetime.now()
-        action_taken = False # Did we rebuild?
         error_occurred = False
 
         try:
-            oilrig_links = self._get_oilrig_links()
-            if not oilrig_links:
-                return -LONG_RETRY_DELAY # Wait long if no links found (likely error/login issue)
+            while True:
+                action_taken = False # Did we rebuild in this round?
+                oilrig_links = self._get_oilrig_links()
+                if not oilrig_links:
+                    return -LONG_RETRY_DELAY # Wait long if no links found (likely error/login issue)
 
-            for oilrig_url in oilrig_links:
-                if action_taken: break # Restart if we rebuilt one
+                for oilrig_url in oilrig_links:
+                    if action_taken: 
+                        self.logger.info(f"[{self.name}] Rebuild started. Waiting 2 seconds before re-checking oil rigs.")
+                        time.sleep(2)
+                        continue # Go back to while True, re-fetch links and check again
 
-                self.logger.info(f"[{self.name}] Checking: {oilrig_url}")
-                self.driver.get(oilrig_url)
-                WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+                    self.logger.info(f"[{self.name}] Checking: {oilrig_url}")
+                    self.driver.get(oilrig_url)
+                    WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
-                try:
-                    # Check Construction
-                    WebDriverWait(self.driver, 10).until(
-                        EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
-                    )
-                    finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-                    finish_time_str = finish_time_p.text.strip().replace('Finishes at', '').strip()
-                    finish_dt = parser.parse(finish_time_str)
-                    wait = (finish_dt - now_for_parsing).total_seconds()
-
-                    if wait > 0:
-                        self.logger.info(f"  Under construction, completion time: {finish_time_str}")
-                        if min_wait_seconds is None or wait < min_wait_seconds:
-                            min_wait_seconds = wait
-                    else:
-                        self.logger.info(f"  Construction completed: {finish_time_str}.")
-                        send_email_notify(
-                            subject="SimCompany Oil Rig Construction Completion Notification",
-                            body=f"Oil Rig ({oilrig_url}) construction has been completed, please check."
+                    try:
+                        # Check Construction
+                        WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
                         )
+                        finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                        finish_time_str = finish_time_p.text.strip().replace('Finishes at', '').strip()
+                        finish_dt = parser.parse(finish_time_str)
+                        wait = (finish_dt - now_for_parsing).total_seconds()
 
-                except TimeoutException:
-                    self.logger.info(f"  Not under construction, checking abundance...")
-                    if self._check_and_rebuild_oilrig(oilrig_url):
-                        action_taken = True # Rebuild started, need to restart loop
+                        if wait > 0:
+                            self.logger.info(f"  Under construction, completion time: {finish_time_str}")
+                            if min_wait_seconds is None or wait < min_wait_seconds:
+                                min_wait_seconds = wait
+                        else:
+                            self.logger.info(f"  Construction completed: {finish_time_str}.")
+                            send_email_notify(
+                                subject="SimCompany Oil Rig Construction Completion Notification",
+                                body=f"Oil Rig ({oilrig_url}) construction has been completed, please check."
+                            )
 
-                except Exception as e_constr:
-                    self.logger.error(f"  Error occurred while checking construction status for {oilrig_url}: {e_constr}", exc_info=True)
-                    error_occurred = True
+                    except TimeoutException:
+                        self.logger.info(f"  Not under construction, checking abundance...")
+                        if self._check_and_rebuild_oilrig(oilrig_url):
+                            action_taken = True # Rebuild started, need to restart loop
 
-                time.sleep(1) # Small delay between checks
+                    except Exception as e_constr:
+                        self.logger.error(f"  Error occurred while checking construction status for {oilrig_url}: {e_constr}", exc_info=True)
+                        error_occurred = True
+
+                    time.sleep(1) # Small delay between checks
+
+                if action_taken:
+                    self.logger.info(f"[{self.name}] Rebuild started. Immediately re-checking oil rigs without quitting driver.")
+                    continue # Go back to while True, re-fetch links and check again
+                break # No rebuild, exit while loop
 
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing interrupted by user.")
@@ -639,10 +657,6 @@ class OilRigMonitor(BaseMonitor):
             error_occurred = True
         finally:
             self._quit_driver()
-
-        if action_taken:
-            self.logger.info(f"[{self.name}] Rebuild started. Restarting check after {REBUILD_DELAY}s.")
-            return REBUILD_DELAY
 
         if error_occurred:
             return -DEFAULT_RETRY_DELAY * 5 # Negative indicates error wait
