@@ -718,44 +718,128 @@ class OilRigMonitor(BaseMonitor):
         return None
 
     def _check_and_rebuild_oilrig(self, oilrig_url):
-        """Checks abundance and triggers rebuild if below 95. Handles confirmation modal if abundance > 80%."""
+        """Checks abundance and triggers rebuild based on new logic."""
         try:
-            abundance_span = self.driver.find_element(By.XPATH, "//span[contains(text(), 'Abundance:')]")
-            match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
-            if not match:
-                self.logger.error(f"  Unable to parse Abundance: {abundance_span.text}")
+            # 1. 取得 Crude oil abundance
+            crude_abundance = None
+            methane_abundance = None
+            # 找 Crude oil
+            try:
+                crude_img = self.driver.find_element(By.XPATH, "//img[@alt='Crude oil']")
+                row_div = crude_img
+                for _ in range(5):
+                    row_div = row_div.find_element(By.XPATH, "..")
+                    if 'row' in row_div.get_attribute('class'):
+                        break
+                abundance_span = row_div.find_element(By.XPATH, ".//span[contains(text(), 'Abundance:')]")
+                match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
+                if match:
+                    crude_abundance = float(match.group(1))
+            except Exception:
+                self.logger.error("  Crude oil abundance not found!")
                 return False
 
-            abundance = float(match.group(1))
-            self.logger.info(f"  Crude Oil Abundance: {abundance}")
+            # 找 Methane
+            try:
+                methane_img = self.driver.find_element(By.XPATH, "//img[@alt='Methane']")
+                row_div = methane_img
+                for _ in range(5):
+                    row_div = row_div.find_element(By.XPATH, "..")
+                    if 'row' in row_div.get_attribute('class'):
+                        break
+                abundance_span = row_div.find_element(By.XPATH, ".//span[contains(text(), 'Abundance:')]")
+                match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
+                if match:
+                    methane_abundance = float(match.group(1))
+            except Exception:
+                methane_abundance = None
 
-            if abundance < 95:
-                self.logger.warning(f"  Abundance ({abundance}) is below 95, automatically clicking Rebuild...")
-                rebuild_btn = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
-                )
-                rebuild_btn.click()
-                self.logger.info("  Rebuild clicked.")
-                # 只有 abundance > 80 才需要處理確認 modal
-                if abundance > 80:
-                    self.logger.info("  Abundance > 80, waiting for confirmation modal...")
+            self.logger.info(f"  Crude oil abundance: {crude_abundance}, Methane abundance: {methane_abundance}")
+
+            # 1. crude oil abundance > 95，通知並等待
+            if crude_abundance is not None and crude_abundance > 95:
+                self.logger.info(f"  Crude oil abundance > 95, no rebuild needed.")
+                return False
+
+            # 2. crude oil abundance 80~95，點擊兩次rebuild
+            if crude_abundance is not None and 80 < crude_abundance <= 95:
+                self.logger.info(f"  Crude oil abundance between 80 and 95, clicking rebuild twice.")
+                for i in range(2):
+                    rebuild_btn = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
+                    )
+                    rebuild_btn.click()
+                    self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
                     try:
                         modal = WebDriverWait(self.driver, 3).until(
                             EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
                         )
-                        self.logger.info("  Confirmation modal appeared, waiting for Rebuild button...")
                         confirm_btn = WebDriverWait(self.driver, 5).until(
                             EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
                         )
                         confirm_btn.click()
-                        self.logger.info("  Confirmation modal 'Rebuild' clicked.")
+                        self.logger.info(f"  Confirmation modal 'Rebuild' clicked. ({i+1}/2)")
+                        time.sleep(1)
                     except TimeoutException:
                         self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
-                time.sleep(2) # Wait for modal to close/transition
-                return True # Rebuild initiated
-            else:
-                self.logger.info(f"  Abundance >= 95, no Rebuild needed.")
-                return False
+                        break
+                time.sleep(2)
+                # rebuild後driver會自動回首頁，不要quit，直接return True讓外層重新搜尋
+                return True
+
+            # 3. crude oil abundance <= 80
+            if crude_abundance is not None and crude_abundance <= 80:
+                # 檢查 methane abundance
+                if methane_abundance is not None and methane_abundance > 80:
+                    self.logger.info(f"  Crude oil <= 80, Methane > 80, clicking rebuild twice.")
+                    for i in range(2):
+                        rebuild_btn = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
+                        )
+                        rebuild_btn.click()
+                        self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
+                        try:
+                            modal = WebDriverWait(self.driver, 3).until(
+                                EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                            )
+                            confirm_btn = WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
+                            )
+                            confirm_btn.click()
+                            self.logger.info(f"  Confirmation modal 'Rebuild' clicked. ({i+1}/2)")
+                            time.sleep(1)
+                        except TimeoutException:
+                            self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
+                            break
+                    time.sleep(2)
+                    # rebuild後driver會自動回首頁，不要quit，直接return True讓外層重新搜尋
+                    return True
+                else:
+                    self.logger.info(f"  Crude oil <= 80, Methane <= 80 or not found, clicking rebuild once.")
+                    rebuild_btn = WebDriverWait(self.driver, 10).until(
+                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
+                    )
+                    rebuild_btn.click()
+                    self.logger.info(f"  Rebuild clicked.")
+                    try:
+                        modal = WebDriverWait(self.driver, 3).until(
+                            EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                        )
+                        confirm_btn = WebDriverWait(self.driver, 5).until(
+                            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
+                        )
+                        confirm_btn.click()
+                        self.logger.info(f"  Confirmation modal 'Rebuild' clicked.")
+                        time.sleep(1)
+                    except TimeoutException:
+                        self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
+                    time.sleep(2)
+                    # rebuild後driver會自動回首頁，不要quit，直接return True讓外層重新搜尋
+                    return True
+
+            # 其他情況
+            self.logger.info(f"  No rebuild action taken.")
+            return False
 
         except NoSuchElementException:
             self.logger.error(f"  Abundance information not found, possibly due to page structure changes or building damage.")
