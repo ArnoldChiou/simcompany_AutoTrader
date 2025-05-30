@@ -197,7 +197,6 @@ class ForestNurseryMonitor(BaseMonitor):
                     self.logger.error(f"[{self.name}] Failed to process {building_url}: {e_building}", exc_info=True)
                     error_occurred = True # Continue with others if possible, but flag for longer wait
 
-            self._save_finish_times(production_finish_times)
 
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing interrupted by user.")
@@ -368,17 +367,6 @@ class ForestNurseryMonitor(BaseMonitor):
 
         except Exception as e:
             self.logger.error(f"Error occurred while finding production completion time for {target_path}: {e}")
-
-
-    def _save_finish_times(self, production_finish_times):
-        """Saves production finish times to a file."""
-        try:
-            with open('record/finish_time.txt', 'w', encoding='utf-8') as f:
-                for dt in production_finish_times:
-                    f.write(f"{dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            self.logger.info("Finish times saved to record/finish_time.txt")
-        except Exception as e:
-            self.logger.error(f"Failed to save finish times: {e}")
 
     def _calculate_wait(self, finish_times, now, is_construction):
         """Calculates the minimum wait time from a list of datetimes."""
