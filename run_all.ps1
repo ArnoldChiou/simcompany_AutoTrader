@@ -7,14 +7,6 @@ Remove-Item -ErrorAction SilentlyContinue "record/monitor_oilrig.log"
 
 $projectPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
-# Define Wait-For-SeleniumFree function
-function Wait-For-SeleniumFree {
-    while (Get-Process -Name chrome, chromedriver -ErrorAction SilentlyContinue) {
-        Write-Host "Selenium/Chrome is still running, waiting 10 seconds..."
-        Start-Sleep -Seconds 10
-    }
-}
-
 # Use Start-Job to execute all functions sequentially to avoid conflicts caused by multiple Selenium instances running simultaneously
 $jobs = @()
 
@@ -28,32 +20,12 @@ $jobDefinitions = @(
 
 foreach ($jobDef in $jobDefinitions) {
     Write-Host "Running $($jobDef.name)"
-    $canStart = $true
-    if ($jobDef.needsSelenium) {
-        $maxTries = 5
-        for ($try = 1; $try -le $maxTries; $try++) {
-            if (Get-Process -Name chrome, chromedriver -ErrorAction SilentlyContinue) {
-                for ($sec = 1; $sec -le 10; $sec++) {
-                    Write-Host "Selenium/Chrome is still running, waiting ($sec/10) seconds before starting $($jobDef.name)... (try $try/$maxTries)"
-                    Start-Sleep -Seconds 1
-                }
-                $canStart = $false
-            } else {
-                $canStart = $true
-                break
-            }
-        }
-    }
-    if ($canStart) {
-        $jobs += Start-Job -ScriptBlock {
-            param($projectPath, $cmd)
-            Set-Location $projectPath
-            python -c $cmd
-        } -ArgumentList $projectPath, $jobDef.cmd
-        Start-Sleep -Seconds 10
-    } else {
-        Write-Host "$($jobDef.name) skipped because Selenium/Chrome is still running after $maxTries checks."
-    }
+    $jobs += Start-Job -ScriptBlock {
+        param($projectPath, $cmd)
+        Set-Location $projectPath
+        python -c $cmd
+    } -ArgumentList $projectPath, $jobDef.cmd
+    Start-Sleep -Seconds 10
 }
 
 Write-Host "All jobs have been started. Please check log files in the record/ directory."
