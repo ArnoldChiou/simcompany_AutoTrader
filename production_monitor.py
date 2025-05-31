@@ -436,15 +436,13 @@ class PowerPlantProducer(BaseMonitor):
                     self.driver.execute_script(f"window.open('{url}', '_blank');")
                 time.sleep(0.3)
 
-            handles = self.driver.window_handles
-            self.logger.info(f"[{self.name}] Opened {len(handles)} tabs.")
-
-            for idx, handle in enumerate(handles):
+            handles = self.driver.window_handles  # Always refresh handles after (re)opening tabs
+            for idx in range(len(handles)):
                 retry_count = 0
                 while retry_count < 2:  # Try at most twice per tab
                     try:
-                        self.driver.switch_to.window(handle)
-                        current_path = self.target_paths[idx] # Assuming order matches
+                        self.driver.switch_to.window(self.driver.window_handles[idx])  # Use fresh handles
+                        current_path = self.target_paths[idx]  # Assuming order matches
                         self.logger.info(f"[{self.name}] Processing: {current_path}")
                         WebDriverWait(self.driver, 20).until(
                             EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
@@ -475,6 +473,7 @@ class PowerPlantProducer(BaseMonitor):
                                 else:
                                     self.driver.execute_script(f"window.open('{url}', '_blank');")
                                 time.sleep(0.3)
+                            # Refresh handles after re-opening
                             handles = self.driver.window_handles
                         else:
                             error_occurred = True
@@ -492,24 +491,24 @@ class PowerPlantProducer(BaseMonitor):
         if error_occurred:
             return DEFAULT_RETRY_DELAY * 5
 
-        # Calculate max wait time
-        max_wait = 0
-        max_time_str = "N/A"
+        # Calculate min wait time
+        min_wait = None
+        min_time_str = "N/A"
         for ft_str in finish_times:
             try:
                 time_str = ft_str.replace('Finishes at', '').strip()
                 finish_dt = parser.parse(time_str)
                 wait = (finish_dt - now).total_seconds()
-                if wait > max_wait:
-                    max_wait = wait
-                    max_time_str = ft_str
+                if wait > 0 and (min_wait is None or wait < min_wait):
+                    min_wait = wait
+                    min_time_str = ft_str
             except Exception:
                 continue
 
-        if max_wait > 0:
-            self.logger.info(f"[{self.name}] Max wait time: {max_wait:.0f} seconds (Until: {max_time_str}).")
+        if min_wait is not None and min_wait > 0:
+            self.logger.info(f"[{self.name}] Min wait time: {min_wait:.0f} seconds (Until: {min_time_str}).")
             play_notification_sound(self.logger)
-            return max_wait
+            return min_wait
         else:
             self.logger.info(f"[{self.name}] No production currently running or all finished.")
             return 0 # Indicate immediate recheck (loop will add delay)
