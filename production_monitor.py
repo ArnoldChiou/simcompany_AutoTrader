@@ -439,30 +439,49 @@ class PowerPlantProducer(BaseMonitor):
             handles = self.driver.window_handles
             self.logger.info(f"[{self.name}] Opened {len(handles)} tabs.")
 
-            # Process each tab
             for idx, handle in enumerate(handles):
-                try:
-                    self.driver.switch_to.window(handle)
-                    current_path = self.target_paths[idx] # Assuming order matches
-                    self.logger.info(f"[{self.name}] Processing: {current_path}")
-                    WebDriverWait(self.driver, 20).until(
-                        EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
-                    )
-                    time.sleep(0.5)
+                retry_count = 0
+                while retry_count < 2:  # Try at most twice per tab
+                    try:
+                        self.driver.switch_to.window(handle)
+                        current_path = self.target_paths[idx] # Assuming order matches
+                        self.logger.info(f"[{self.name}] Processing: {current_path}")
+                        WebDriverWait(self.driver, 20).until(
+                            EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
+                        )
+                        time.sleep(0.5)
 
-                    if not self._check_and_start_production(current_path, finish_times):
-                        self._get_existing_finish_time(current_path, finish_times)
-
-                except WebDriverException as e_wd:
-                     self.logger.error(f"[{self.name}] WebDriver error processing tab {idx}: {e_wd}", exc_info=True)
-                     error_occurred = True
-                     break # Stop processing tabs on major error
-                except Exception as e_tab:
-                    self.logger.error(f"[{self.name}] Error processing tab {idx}: {e_tab}", exc_info=True)
-                    error_occurred = True
-
+                        if not self._check_and_start_production(current_path, finish_times):
+                            self._get_existing_finish_time(current_path, finish_times)
+                        break  # Success, break retry loop
+                    except (WebDriverException, ConnectionResetError, Exception) as e_wd:
+                        self.logger.error(f"[{self.name}] WebDriver/connection error processing tab {idx} (attempt {retry_count+1}): {e_wd}", exc_info=True)
+                        retry_count += 1
+                        if retry_count < 2:
+                            self.logger.info(f"[{self.name}] Attempting to re-initialize driver and retry tab {idx}...")
+                            try:
+                                self._quit_driver()
+                            except Exception:
+                                pass
+                            if not self._initialize_driver():
+                                self.logger.error(f"[{self.name}] Failed to re-initialize driver on retry.")
+                                error_occurred = True
+                                break
+                            # Re-open all tabs up to current
+                            for reopen_idx in range(idx+1):
+                                url = self.base_url + self.target_paths[reopen_idx]
+                                if reopen_idx == 0:
+                                    self.driver.get(url)
+                                else:
+                                    self.driver.execute_script(f"window.open('{url}', '_blank');")
+                                time.sleep(0.3)
+                            handles = self.driver.window_handles
+                        else:
+                            error_occurred = True
+                            break
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing interrupted by user.")
+            self._quit_driver()
             return None
         except Exception as e_main:
             self.logger.critical(f"[{self.name}] Unhandled error in processing loop: {e_main}", exc_info=True)

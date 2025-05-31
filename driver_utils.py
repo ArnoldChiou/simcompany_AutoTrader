@@ -24,6 +24,9 @@ def initialize_driver(user_data_dir_env_var="USER_DATA_DIR", profile_dir="Defaul
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--remote-debugging-port=9222')
+        options.add_argument('--disable-gpu') # Added for stability
+        options.add_argument('--start-maximized') # Added for stability
+        options.add_argument('--disable-extensions') # Added for stability
         options.add_experimental_option("excludeSwitches", ["enable-logging"])
 
         user_data_dir = os.getenv(user_data_dir_env_var)
@@ -44,6 +47,9 @@ def initialize_driver(user_data_dir_env_var="USER_DATA_DIR", profile_dir="Defaul
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-dev-shm-usage')
                 options.add_argument('--remote-debugging-port=9222')
+                options.add_argument('--disable-gpu') # Added for stability
+                options.add_argument('--start-maximized') # Added for stability
+                options.add_argument('--disable-extensions') # Added for stability
                 options.add_experimental_option("excludeSwitches", ["enable-logging"])
                 driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
                 return driver

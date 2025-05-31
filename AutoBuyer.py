@@ -41,6 +41,20 @@ class AutoBuyer:
         self._market_data_cache = {}  # key: (product_name, quality), value: (timestamp, data)
         self._market_data_cache_ttl = 60  # seconds, adjust as needed
 
+        # --- Setup for error logging ---
+        self.error_log_path = os.path.join('record', 'autobuyer_error.log')
+        if not os.path.exists('record'):
+            os.makedirs('record')
+
+    def _log_error_message(self, message):
+        try:
+            with open(self.error_log_path, 'a', encoding='utf-8') as f:
+                import datetime # Import locally
+                timestamp = datetime.datetime.now().isoformat()
+                f.write(f"[{timestamp}] {message}\n")
+        except Exception as e:
+            print(f"CRITICAL: Failed to write to error log: {e}") # Print to console if logging itself fails
+
     def _extract_resource_id(self, url):
         """Parse resource ID from product API URL"""
         try:
@@ -78,12 +92,16 @@ class AutoBuyer:
     # --- Modified trigger_buy_action to accept product details ---
     def trigger_buy_action(self, product_name, product_info, order_id, price, quantity_available):
         if not self.driver:
-            print("XXX Selenium purchase failed: WebDriver instance is invalid. XXX")
+            err_msg = "Selenium purchase failed: WebDriver instance is invalid."
+            print(f"XXX {err_msg} XXX")
+            self._log_error_message(f"{product_name}: {err_msg}")
             return False
 
         resource_id = self._extract_resource_id(product_info['url'])
         if resource_id is None:
-            print(f"XXX Selenium purchase failed: Unable to parse resource ID for {product_name} from {product_info['url']}. XXX")
+            err_msg = f"Selenium purchase failed: Unable to parse resource ID for {product_name} from {product_info['url']}."
+            print(f"XXX {err_msg} XXX")
+            self._log_error_message(err_msg)
             return False
         market_page_url = f"https://www.simcompanies.com/market/resource/{resource_id}/"
         target_quality = product_info['quality'] # Get quality for logging/logic
@@ -143,7 +161,9 @@ class AutoBuyer:
                 time.sleep(0.5)
 
             if not is_button_enabled:
-                print("XXX Buy button remains disabled, cannot click. Possibly insufficient balance or invalid quantity. XXX")
+                err_msg = f"Buy button remains disabled for {product_name}, cannot click. Possibly insufficient balance or invalid quantity."
+                print(f"XXX {err_msg} XXX")
+                self._log_error_message(err_msg)
                 print(f"===================================")
                 return False
 
@@ -173,19 +193,26 @@ class AutoBuyer:
                 try:
                     error_element_xpath = "//div[contains(@class, 'error-message') or contains(@class, 'alert-danger') or contains(@class, 'alert-warning')]"
                     error_message = self.driver.find_element(By.XPATH, error_element_xpath).text
-                    print(f"XXX Selenium purchase failed ({product_name}): Detected error/warning message: {error_message} XXX")
+                    err_msg = f"Selenium purchase failed ({product_name}): Detected error/warning message: {error_message}"
+                    print(f"XXX {err_msg} XXX")
+                    self._log_error_message(err_msg)
                 except NoSuchElementException:
-                    print(f"XXX Selenium purchase timeout ({product_name}): No success or error indicator detected. XXX")
+                    err_msg = f"Selenium purchase timeout ({product_name}): No success or error indicator detected."
+                    print(f"XXX {err_msg} XXX")
+                    self._log_error_message(err_msg)
                 print(f"===================================")
                 return False
 
-        except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e:
-            print(f"XXX Selenium purchase failed ({product_name}): Error finding element or during operation: {type(e).__name__} XXX")
-            print(f"Error message: {e}")
+        except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e_sel_op:
+            err_msg = f"Selenium purchase failed ({product_name}): Error finding element or during operation: {type(e_sel_op).__name__} - {e_sel_op}"
+            print(f"XXX {err_msg} XXX")
+            self._log_error_message(err_msg)
             print(f"===================================")
             return False
-        except Exception as e:
-            print(f"XXX Selenium purchase failed ({product_name}): Unexpected error during purchase:")
+        except Exception as e_trigger_buy:
+            err_msg = f"Selenium purchase failed ({product_name}): Unexpected error during purchase: {type(e_trigger_buy).__name__} - {e_trigger_buy}"
+            print(f"XXX {err_msg} XXX")
+            self._log_error_message(f"{err_msg}\n{traceback.format_exc()}")
             traceback.print_exc()
             print(f"===================================")
             return False
@@ -203,6 +230,9 @@ class AutoBuyer:
             profile_dir = "Default"
             options.add_argument(f"user-data-dir={user_data_dir}")
             options.add_argument(f"--profile-directory={profile_dir}")
+            options.add_argument('--no-sandbox')
+            options.add_argument('--disable-dev-shm-usage')
+            options.add_argument('--disable-gpu')
             options.add_experimental_option("excludeSwitches", ["enable-logging"])
             while True:
                 purchase_attempted_in_cycle = False
@@ -226,7 +256,9 @@ class AutoBuyer:
                     if market_data is None:
                         # This indicates a failure in get_market_data, e.g. 429 error.
                         # market_utils.get_market_data is expected to print the specific error.
-                        print(f"Failed to fetch market data for {product_name}. Assuming API issue (e.g., rate limit). Backing off for this cycle.")
+                        err_msg = f"Failed to fetch market data for {product_name}. Assuming API issue (e.g., rate limit). Backing off for this cycle."
+                        print(err_msg)
+                        self._log_error_message(err_msg) # Log the error
                         api_error_in_cycle = True
                         break  # Exit the product loop immediately to enforce backoff
 
@@ -243,12 +275,20 @@ class AutoBuyer:
                             print(f"***> Condition met ({product_name})! Lowest price ${lowest_price:.3f} < threshold ${buy_threshold_price:.3f}")
                             if self.driver is None:
                                 print("Initializing Selenium WebDriver...")
-                                service = ChromeService(ChromeDriverManager().install())
-                                self.driver = webdriver.Chrome(service=service, options=options)
+                                try:
+                                    service = ChromeService(ChromeDriverManager().install())
+                                    self.driver = webdriver.Chrome(service=service, options=options)
+                                except Exception as e_wd_init: # Catch specific exception for logging
+                                    err_msg = f"WebDriver initialization failed: {type(e_wd_init).__name__} - {e_wd_init}"
+                                    print(err_msg)
+                                    self._log_error_message(err_msg) # Log the error
+                                    raise # Re-raise the exception to stop the process if critical
 
                             resource_id = self._extract_resource_id(product_info['url'])
                             if resource_id is None:
-                                print(f"XXX Unable to start purchase for {product_name}, could not parse resource ID. Skipping this product. XXX")
+                                err_msg = f"Unable to start purchase for {product_name}, could not parse resource ID. Skipping this product."
+                                print(f"XXX {err_msg} XXX")
+                                self._log_error_message(err_msg)
                                 continue
 
                             market_page_url = f"https://www.simcompanies.com/market/resource/{resource_id}/"
@@ -272,32 +312,41 @@ class AutoBuyer:
                                         time.sleep(1)
                                         continue
                                 else:
-                                    raise TimeoutException("Failed to get a stable reference to the login element after retries.")
+                                    err_msg = "Failed to get a stable reference to the login element after retries."
+                                    print(f"XXX {err_msg} XXX")
+                                    self._log_error_message(f"Login check for {product_name}: {err_msg}")
+                                    # Instead of raising, just log and skip this attempt
+                                    login_confirmed = False # Ensure it's false
                             except TimeoutException:
+                                err_msg = "Login indicator element not found within expected time."
                                 print("\n" + "*"*20)
-                                print("Warning: Login indicator element not found within expected time.")
+                                print(f"Warning: {err_msg}")
+                                self._log_error_message(f"Login check for {product_name}: {err_msg} - Manual login might be required.")
                                 print(">>> You may need to log in to SimCompanies manually <<<")
-                                print("Please enter your account and password in the opened Chrome browser window to log in.")
                                 input(">>> After logging in, return here and press Enter to continue <<<")
                                 print("*"*20 + "\n")
                                 print("Trying to refresh the page and check login status again...")
                                 self.driver.refresh()
                                 try:
                                     wait = WebDriverWait(self.driver, 15)
-                                    for attempt in range(3):
+                                    for attempt_refresh in range(3):
                                         try:
                                             wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, login_check_element_selector)))
                                             print("Login confirmed after refresh.")
                                             login_confirmed = True
                                             break
                                         except StaleElementReferenceException:
-                                            print(f"StaleElementReferenceException caught after refresh, retrying ({attempt+1}/3)...")
+                                            print(f"StaleElementReferenceException caught after refresh, retrying ({attempt_refresh+1}/3)...")
                                             time.sleep(1)
                                             continue
                                     else:
-                                        print("XXX Warning: Still unable to confirm login status after refresh. Subsequent purchase may fail. XXX")
+                                        err_msg = "Still unable to confirm login status after refresh. Subsequent purchase may fail."
+                                        print(f"XXX Warning: {err_msg} XXX")
+                                        self._log_error_message(f"Login check for {product_name}: {err_msg}")
                                 except TimeoutException:
-                                    print("XXX Warning: Still unable to confirm login status after refresh. Subsequent purchase may fail. XXX")
+                                    err_msg = "Still unable to confirm login status after refresh. Subsequent purchase may fail."
+                                    print(f"XXX Warning: {err_msg} XXX")
+                                    self._log_error_message(f"Login check for {product_name}: {err_msg}")
 
                             if login_confirmed:
                                 success = self.trigger_buy_action(  # Pass product details
@@ -311,9 +360,13 @@ class AutoBuyer:
                                 if success:
                                     print(f"Selenium buy operation ({product_name}) completed successfully.")
                                 else:
-                                    print(f"Selenium buy operation ({product_name}) failed or not executed.")
+                                    err_msg = f"Selenium buy operation ({product_name}) failed or not executed."
+                                    print(err_msg)
+                                    self._log_error_message(err_msg) # Log the failure
                             else:
-                                print(f"Login not confirmed ({product_name}), skipping this purchase attempt.")
+                                err_msg = f"Login not confirmed ({product_name}), skipping this purchase attempt."
+                                print(err_msg)
+                                self._log_error_message(err_msg) # Log the failure
 
                         else:
                             print(f"---> Condition not met ({product_name}). Lowest price ${lowest_price:.3f} >= threshold ${buy_threshold_price:.3f}")
@@ -322,7 +375,9 @@ class AutoBuyer:
                         lowest_order = market_data['lowest_order']
                         print(f"Only one price level found ({product_name}: lowest order ID:{lowest_order['id']}, ${lowest_order['price']:.3f}, {lowest_order['quantity']} units), cannot compare, skipping trigger check.")
                     else:  # market_data is not None, but doesn't have expected keys
-                        print(f"Not enough market data obtained this check ({product_name}: missing lowest order and/or second lowest price), will retry later.")
+                        err_msg = f"Not enough market data obtained this check ({product_name}: missing lowest order and/or second lowest price), will retry later."
+                        print(err_msg)
+                        self._log_error_message(err_msg) # Log the error
                         # If market_data is incomplete (e.g. after a 429 error was logged by a utility),
                         # treat this as an API error to trigger backoff.
                         print(f"Assuming API issue for {product_name} due to incomplete data. Backing off for this cycle.")
@@ -340,8 +395,10 @@ class AutoBuyer:
                     try:
                         self.driver.quit()
                         print("WebDriver closed successfully.")
-                    except Exception as e:  # Catch more general exceptions during quit
-                        print(f"Error closing WebDriver: {type(e).__name__} - {e}")
+                    except Exception as e_wd_quit:  # Catch more general exceptions during quit
+                        err_msg = f"Error closing WebDriver: {type(e_wd_quit).__name__} - {e_wd_quit}"
+                        print(err_msg)
+                        self._log_error_message(err_msg) # Log the error
                     finally:
                         self.driver = None  # Important to reset for the next cycle
 
@@ -359,12 +416,15 @@ class AutoBuyer:
 
                 time.sleep(sleep_duration_seconds)
 
-        except WebDriverException as e:
-            print(f"XXX Error occurred while starting or operating WebDriver: {type(e).__name__} XXX")
-            print(f"Error message: {e}")
+        except WebDriverException as e_wd_main:
+            err_msg = f"Error occurred while starting or operating WebDriver: {type(e_wd_main).__name__} - {e_wd_main}"
+            print(f"XXX {err_msg} XXX")
+            self._log_error_message(f"{err_msg}\n{traceback.format_exc()}") # Log with stack trace
             traceback.print_exc()
-        except Exception as e:
-            print(f"XXX Unexpected error occurred during main loop: {type(e).__name__} XXX")
+        except Exception as e_main_loop:
+            err_msg = f"Unexpected error occurred during main loop: {type(e_main_loop).__name__} - {e_main_loop}"
+            print(f"XXX {err_msg} XXX")
+            self._log_error_message(f"{err_msg}\n{traceback.format_exc()}") # Log with stack trace
             traceback.print_exc()
         finally:
             if self.driver:
@@ -372,7 +432,9 @@ class AutoBuyer:
                 try:
                     self.driver.quit()
                     print("WebDriver closed successfully in finally block.")
-                except Exception as e:  # Catch more general exceptions during quit
-                    print(f"Error closing WebDriver in finally block: {type(e).__name__} - {e}")
+                except Exception as e_wd_finally_quit:  # Catch more general exceptions during quit
+                    err_msg = f"Error closing WebDriver in finally block: {type(e_wd_finally_quit).__name__} - {e_wd_finally_quit}"
+                    print(err_msg)
+                    self._log_error_message(err_msg) # Log the error
                 finally:
                     self.driver = None  # Ensure it's reset
