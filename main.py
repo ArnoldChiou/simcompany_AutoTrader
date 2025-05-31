@@ -1,21 +1,15 @@
-# Import setup_logger for per-monitor logging
-from production_monitor import setup_logger
-# Import classes
-from AutoBuyer import AutoBuyer
+import os
 import traceback
-from selenium import webdriver
-# from selenium.webdriver.common.by import By # No longer used directly here
-# from selenium.webdriver.common.keys import Keys # No longer used directly here
 import time
-import inquirer # Import inquirer
-# Import NEW classes from production_monitor.py
+import inquirer
+from selenium import webdriver
+from production_monitor import setup_logger
+from AutoBuyer import AutoBuyer
 from production_monitor import (
     ForestNurseryMonitor,
     PowerPlantProducer,
     OilRigMonitor
 )
-
-# Import shared configurations from config.py
 from config import (
     TARGET_PRODUCTS, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
     MARKET_HEADERS # Import MARKET_HEADERS
@@ -23,17 +17,17 @@ from config import (
 
 def run_auto_buyer():
     print("\nStarting AutoBuyer automatic purchase mode (monitoring all target products)...")
-    print(f"Target products: {list(TARGET_PRODUCTS.keys())}") # Show all target product names
-    print(f"Max purchase quantity: {MAX_BUY_QUANTITY if MAX_BUY_QUANTITY is not None else 'Unlimited'}")
+    print(f"Target products: {list(TARGET_PRODUCTS.keys())}") # Show all target product names    print(f"Max purchase quantity: {MAX_BUY_QUANTITY if MAX_BUY_QUANTITY is not None else 'Unlimited'}")
     print("-------------------------------------")
     try:
+        user_data_dir = os.getenv("USER_DATA_DIR_autobuy")
         buyer = AutoBuyer(
             target_products=TARGET_PRODUCTS, # Pass the dictionary
             max_buy_quantity=MAX_BUY_QUANTITY, # Pass the dictionary instead of a single value
             market_headers=MARKET_HEADERS,
             headers=None, # AutoBuyer uses MARKET_HEADERS internally for requests
-            cookies=None, # AutoBuyer handles cookies via Selenium profile
-            driver=None
+            cookies=None,  # AutoBuyer handles cookies via Selenium profile
+            drivers=user_data_dir
         )
         buyer.main_loop()
     except KeyboardInterrupt:
@@ -66,29 +60,38 @@ def login_to_game():
 
 def run_forest_nursery_monitor(logger):
     """Starts the Forest Nursery monitor."""
-    # --- IMPORTANT: Define your Forest Nursery paths here ---
     fn_paths = ["/b/43694783/"] # Or load from config
-    monitor = ForestNurseryMonitor(fn_paths, logger=logger)
+    user_data_dir = os.getenv("USER_DATA_DIR_forestnursery")
+    monitor = ForestNurseryMonitor(fn_paths, logger=logger, user_data_dir=user_data_dir)
     monitor.run()
 
 
 def run_power_plant_producer(logger):
     """Starts the Power Plant producer."""
-    # --- IMPORTANT: Define your Power Plant paths here ---
     pp_paths = [
         "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
         "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
         "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
     ] # Or load from config
-    producer = PowerPlantProducer(pp_paths, logger=logger)
+    user_data_dir = os.getenv("USER_DATA_DIR_powerplant")
+    producer = PowerPlantProducer(pp_paths, logger=logger, user_data_dir=user_data_dir)
     producer.run()
 
 
 def run_oil_rig_monitor(logger):
     """Starts the Oil Rig monitor."""
-    monitor = OilRigMonitor(logger=logger)
+    user_data_dir = os.getenv("USER_DATA_DIR_oiirig")
+    monitor = OilRigMonitor(logger=logger, user_data_dir=user_data_dir)
     monitor.run()
 
+def run_init_all_profiles():
+    import subprocess
+    print("\n開始初始化所有 Chrome profiles ...")
+    try:
+        # 直接呼叫 python init_all_profiles.py
+        subprocess.run(["python", "init_all_profiles.py"], check=True)
+    except Exception as e:
+        print(f"初始化 profiles 發生錯誤: {e}")
 
 if __name__ == "__main__":
     try:
@@ -102,6 +105,7 @@ if __name__ == "__main__":
                     ("Monitor Forest Nursery", "3"),
                     ("Produce Power Plant", "4"),
                     ("Monitor All Oil Rigs", "5"),
+                    ("Init all Chrome profiles", "init_profiles"),
                     ("Exit", "exit"),
                 ],
             ),
@@ -127,6 +131,8 @@ if __name__ == "__main__":
         elif mode == "5":
             logger = setup_logger("production_monitor.oilrig", "monitor_oilrig.log")
             run_oil_rig_monitor(logger)
+        elif mode == "init_profiles":
+            run_init_all_profiles()
         elif mode == "exit":
             print("Program ended.")
         else:

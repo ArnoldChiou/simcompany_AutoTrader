@@ -30,13 +30,14 @@ load_dotenv()
 
 class AutoBuyer:
     # --- Modified __init__ to accept target_products dictionary ---
-    def __init__(self, target_products, max_buy_quantity, market_headers, headers, cookies, driver: WebDriver): # Removed product_api_url, target_quality
+    # Removed driver: WebDriver from parameters
+    def __init__(self, target_products, max_buy_quantity, market_headers, headers, cookies, drivers):
         self.TARGET_PRODUCTS = target_products # Store the dictionary
         self.MAX_BUY_QUANTITY = max_buy_quantity # Store the dictionary instead of a single value
         self.MARKET_HEADERS = market_headers
         self.session = requests.Session() # Keep requests session for market data fetching
         self.session.headers.update(self.MARKET_HEADERS)
-        self.driver = driver # This will be None initially, set in main_loop
+        self.driver = drivers # Initialize driver to None, will be created in main_loop
         # --- Add market data cache ---
         self._market_data_cache = {}  # key: (product_name, quality), value: (timestamp, data)
         self._market_data_cache_ttl = 60  # seconds, adjust as needed
@@ -218,18 +219,22 @@ class AutoBuyer:
             return False
 
     def main_loop(self):
-        driver = None
+        # self.driver is initialized to None in __init__ and will be (re)created here if needed.
+        # Any driver passed via __init__ is no longer accepted.
         try:
             options = webdriver.ChromeOptions()
-            user_data_dir = os.getenv("USER_DATA_DIR")
-            if not user_data_dir:
-                raise ValueError("USER_DATA_DIR environment variable not set or empty in .env file, please check configuration.")
-            if not os.path.exists(user_data_dir):
-                raise FileNotFoundError(f"The specified user data directory does not exist: {user_data_dir}")
-            print(user_data_dir)
-            profile_dir = "Default"
-            options.add_argument(f"user-data-dir={user_data_dir}")
-            options.add_argument(f"--profile-directory={profile_dir}")
+            # Use USER_DATA_DIR_autobuy for AutoBuyer
+            user_data_dir_autobuy = os.getenv("USER_DATA_DIR_autobuy")
+            if not user_data_dir_autobuy:
+                raise ValueError("USER_DATA_DIR_autobuy environment variable not set or empty in .env file, please check configuration.")
+            if not os.path.exists(user_data_dir_autobuy):
+                raise FileNotFoundError(f"The specified user data directory for autobuy does not exist: {user_data_dir_autobuy}")
+            
+            print(f"AutoBuyer will use profile: {user_data_dir_autobuy}")
+            options.add_argument(f"user-data-dir={user_data_dir_autobuy}")
+            # The --profile-directory argument is often not needed if user-data-dir points to the specific profile folder.
+            # options.add_argument(f"--profile-directory=Default") 
+
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
@@ -274,9 +279,10 @@ class AutoBuyer:
                         if lowest_price < buy_threshold_price:
                             print(f"***> Condition met ({product_name})! Lowest price ${lowest_price:.3f} < threshold ${buy_threshold_price:.3f}")
                             if self.driver is None:
-                                print("Initializing Selenium WebDriver...")
+                                print("Initializing Selenium WebDriver in AutoBuyer.main_loop...")
                                 try:
                                     service = ChromeService(ChromeDriverManager().install())
+                                    # Ensure self.driver is assigned the new driver instance
                                     self.driver = webdriver.Chrome(service=service, options=options)
                                 except Exception as e_wd_init: # Catch specific exception for logging
                                     err_msg = f"WebDriver initialization failed: {type(e_wd_init).__name__} - {e_wd_init}"
@@ -390,17 +396,17 @@ class AutoBuyer:
                         print(f"Sleeping {sleep_time:.2f} seconds before next product check...")
                         time.sleep(sleep_time)
 
-                if self.driver:  # If WebDriver was initialized in this cycle
-                    print("\nEnsuring WebDriver is closed at the end of the cycle...")
+                if self.driver: # If WebDriver was initialized in this cycle
+                    print("\nEnsuring WebDriver is closed at the end of the product check iteration...")
                     try:
                         self.driver.quit()
-                        print("WebDriver closed successfully.")
+                        print("WebDriver closed successfully after product check iteration.")
                     except Exception as e_wd_quit:  # Catch more general exceptions during quit
-                        err_msg = f"Error closing WebDriver: {type(e_wd_quit).__name__} - {e_wd_quit}"
+                        err_msg = f"Error closing WebDriver after product check iteration: {type(e_wd_quit).__name__} - {e_wd_quit}"
                         print(err_msg)
                         self._log_error_message(err_msg) # Log the error
                     finally:
-                        self.driver = None  # Important to reset for the next cycle
+                        self.driver = None  # Important to reset for the next full cycle or if buy condition met again
 
                 # --- Increase and randomize sleep duration between cycles ---
                 min_sleep = DEFAULT_CHECK_INTERVAL_SECONDS * 0.8

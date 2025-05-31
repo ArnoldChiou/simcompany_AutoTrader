@@ -5,6 +5,7 @@ import re
 import traceback
 import logging
 from dateutil import parser
+from dotenv import load_dotenv
 
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -66,24 +67,65 @@ def play_notification_sound(logger, count=3, duration=500, frequency=1000):
 # --- Base Monitor Class ---
 class BaseMonitor:
     """Base class for monitoring tasks."""
-    def __init__(self, name, base_url=BASE_URL, logger=None):
+    def __init__(self, name, base_url=BASE_URL, logger=None, user_data_dir=None):
         self.name = name
         self.base_url = base_url
         self.driver = None
         self.logger = logger
+        self.user_data_dir = user_data_dir
+
+    def _is_logged_in(self):
+        """Check if the user is already logged in by looking for login/signin links."""
+        try:
+            # SimCompanies: if there's a 'Sign in' or 'Login' link, not logged in
+            login_btns = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/signin') or contains(@href, '/login')]")
+            return not bool(login_btns)
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] Error checking login status: {e}")
+            return False
 
     def _initialize_driver(self):
-        self.logger.info(f"[{self.name}] Initializing WebDriver...")
+        self.logger.info(f"[{self.name}] Initializing WebDriver with profile: {self.user_data_dir or 'default'}...")
         try:
-            self.driver = initialize_driver()
+            self.driver = initialize_driver(user_data_dir=self.user_data_dir)
+
             if self.driver:
-                self.logger.info(f"[{self.name}] WebDriver initialized successfully.")
-                return True
+                self.logger.info(f"[{self.name}] WebDriver initialized for profile: {self.user_data_dir or 'default'}.")
+                self.logger.info(f"[{self.name}] Navigating to {self.base_url} for initial login check.")
+                try:
+                    self.driver.get(self.base_url)
+                    time.sleep(2)
+                    if not self._is_logged_in():
+                        input(
+                            f"[{self.name}] Profile: '{self.user_data_dir or 'Default'}'. "
+                            f"Browser window should be open. Please ensure you are logged in at {self.base_url}. "
+                            "Press Enter in this console to continue..."
+                        )
+                        self.logger.info(f"[{self.name}] User confirmed login check. Proceeding.")
+                    else:
+                        self.logger.info(f"[{self.name}] Detected already logged in, proceeding automatically.")
+                    return True
+                except WebDriverException as e_nav:
+                    self.logger.error(f"[{self.name}] Error navigating to {self.base_url} for login check: {e_nav}")
+                    if self.driver:
+                        try:
+                            self.driver.quit()
+                        except Exception as e_quit_nav:
+                            self.logger.error(f"[{self.name}] Error quitting driver during navigation exception cleanup: {e_quit_nav}")
+                        self.driver = None
+                    return False
             else:
-                self.logger.error(f"[{self.name}] Failed to initialize WebDriver after all attempts.")
+                self.logger.error(f"[{self.name}] WebDriver initialization returned None (failed) for profile: {self.user_data_dir or 'default'}.")
                 return False
+
         except Exception as e:
-            self.logger.critical(f"[{self.name}] Critical error during WebDriver initialization: {e}", exc_info=True)
+            self.logger.error(f"[{self.name}] Critical error during WebDriver initialization or login check for profile '{self.user_data_dir or 'default'}': {e}")
+            if self.driver:
+                try:
+                    self.driver.quit()
+                except Exception as e_quit:
+                    self.logger.error(f"[{self.name}] Error quitting driver during general exception cleanup: {e_quit}")
+                self.driver = None
             return False
 
     def _quit_driver(self):
@@ -126,8 +168,8 @@ class BaseMonitor:
 # --- Forest Nursery Monitor ---
 class ForestNurseryMonitor(BaseMonitor):
     """Monitors Forest Nursery production and construction."""
-    def __init__(self, target_paths, logger=None):
-        super().__init__("ForestNursery", logger=logger)
+    def __init__(self, target_paths, logger=None, user_data_dir=None):
+        super().__init__("ForestNursery", logger=logger, user_data_dir=user_data_dir)
         self.target_paths = target_paths
 
     def run(self):
@@ -393,8 +435,8 @@ class ForestNurseryMonitor(BaseMonitor):
 # --- Power Plant Producer ---
 class PowerPlantProducer(BaseMonitor):
     """Manages Power Plant production cycles."""
-    def __init__(self, target_paths, logger=None):
-        super().__init__("PowerPlant", logger=logger)
+    def __init__(self, target_paths, logger=None, user_data_dir=None):
+        super().__init__("PowerPlant", logger=logger, user_data_dir=user_data_dir)
         self.target_paths = target_paths
 
     def run(self):
@@ -558,8 +600,8 @@ class PowerPlantProducer(BaseMonitor):
 # --- Oil Rig Monitor ---
 class OilRigMonitor(BaseMonitor):
     """Monitors Oil Rig construction and abundance, handles rebuilds."""
-    def __init__(self, logger=None):
-        super().__init__("OilRig", logger=logger)
+    def __init__(self, logger=None, user_data_dir=None):
+        super().__init__("OilRig", logger=logger, user_data_dir=user_data_dir)
         self.landscape_url = f"{self.base_url}/landscape/"
 
     def run(self):
@@ -581,13 +623,11 @@ class OilRigMonitor(BaseMonitor):
             else:
                  self.logger.warning(f"[{self.name}] No construction or rebuild needed, or error occurred. "
                                 f"Monitoring ends (or retries after long delay if error).")
-                 # If wait_seconds is 0, it means no construction found.
-                 # If negative, it was an error code, use long delay.
                  if wait_seconds == 0:
                      self.logger.info(f"[{self.name}] No active construction found. Exiting normally.")
-                     return # Exit the loop normally
+                     return
                  else:
-                     time.sleep(LONG_RETRY_DELAY) # Long wait on errors
+                     time.sleep(LONG_RETRY_DELAY)
 
             self.logger.info(f"\n[{self.name}] === Starting new check cycle ===\n")
 
@@ -595,7 +635,7 @@ class OilRigMonitor(BaseMonitor):
     def _process_rigs(self):
         """Processes all oil rigs once and returns wait time or None."""
         if not self._initialize_driver():
-            return -LONG_RETRY_DELAY # Negative indicates error wait
+            return -LONG_RETRY_DELAY
 
         min_wait_seconds = None
         now_for_parsing = datetime.datetime.now()
@@ -603,23 +643,22 @@ class OilRigMonitor(BaseMonitor):
 
         try:
             while True:
-                action_taken = False # Did we rebuild in this round?
+                action_taken = False
                 oilrig_links = self._get_oilrig_links()
                 if not oilrig_links:
-                    return -LONG_RETRY_DELAY # Wait long if no links found (likely error/login issue)
+                    return -LONG_RETRY_DELAY
 
                 for oilrig_url in oilrig_links:
                     if action_taken: 
                         self.logger.info(f"[{self.name}] Rebuild started. Waiting 2 seconds before re-checking oil rigs.")
                         time.sleep(2)
-                        continue # Go back to while True, re-fetch links and check again
+                        continue
 
                     self.logger.info(f"[{self.name}] Checking: {oilrig_url}")
                     self.driver.get(oilrig_url)
                     WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
                     try:
-                        # Check Construction
                         WebDriverWait(self.driver, 10).until(
                             EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
                         )
@@ -642,22 +681,22 @@ class OilRigMonitor(BaseMonitor):
                     except TimeoutException:
                         self.logger.info(f"  Not under construction, checking abundance...")
                         if self._check_and_rebuild_oilrig(oilrig_url):
-                            action_taken = True # Rebuild started, need to restart loop
+                            action_taken = True
 
                     except Exception as e_constr:
                         self.logger.error(f"  Error occurred while checking construction status for {oilrig_url}: {e_constr}", exc_info=True)
                         error_occurred = True
 
-                    time.sleep(1) # Small delay between checks
+                    time.sleep(1)
 
                 if action_taken:
                     self.logger.info(f"[{self.name}] Rebuild started. Immediately re-checking oil rigs without quitting driver.")
-                    continue # Go back to while True, re-fetch links and check again
-                break # No rebuild, exit while loop
+                    continue
+                break
 
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing interrupted by user.")
-            return None # Signal to stop
+            return None
         except Exception as e_main:
             self.logger.critical(f"[{self.name}] Unhandled error in processing loop: {e_main}", exc_info=True)
             error_occurred = True
@@ -665,14 +704,14 @@ class OilRigMonitor(BaseMonitor):
             self._quit_driver()
 
         if error_occurred:
-            return -DEFAULT_RETRY_DELAY * 5 # Negative indicates error wait
+            return -DEFAULT_RETRY_DELAY * 5
 
         if min_wait_seconds is not None:
             self.logger.info(f"[{self.name}] Earliest construction completion requires waiting {min_wait_seconds:.0f} seconds.")
             return min_wait_seconds + CONSTRUCTION_CHECK_BUFFER
 
         self.logger.info(f"[{self.name}] No construction or rebuild needed for Oil Rigs.")
-        return 0 # 0 indicates nothing to wait for, exit loop
+        return 0
 
 
     def _get_oilrig_links(self):
@@ -681,20 +720,19 @@ class OilRigMonitor(BaseMonitor):
         self.driver.get(self.landscape_url)
 
         if self._check_login_required(self.landscape_url):
-            return None # Exit if login is needed
+            return None
 
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
                 WebDriverWait(self.driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "a")))
-                time.sleep(5) # Allow dynamic content to load
+                time.sleep(5)
 
                 a_tags = self.driver.find_elements(By.TAG_NAME, "a")
                 links = []
                 for a in a_tags:
                     href = a.get_attribute('href')
                     if href and "/b/" in href:
-                        # Check for 'Oil rig' in alt text or span
                         is_oil_rig = False
                         try:
                             imgs = a.find_elements(By.TAG_NAME, "img")
@@ -706,7 +744,7 @@ class OilRigMonitor(BaseMonitor):
                                      is_oil_rig = True
                         except StaleElementReferenceException:
                             self.logger.warning(f"[{self.name}] Stale element while checking tag {href}. Retrying...")
-                            raise # Trigger retry
+                            raise
                         
                         if is_oil_rig and href not in links:
                             links.append(href)
@@ -716,7 +754,6 @@ class OilRigMonitor(BaseMonitor):
                     return links
                 else:
                     self.logger.warning(f"[{self.name}] No Oil Rig links found on attempt {attempt + 1}.")
-                    # Save screenshot on last attempt if still failing
                     if attempt == max_attempts - 1:
                         self._save_screenshot("no_oil_rigs_found")
                         send_email_notify(
@@ -724,7 +761,6 @@ class OilRigMonitor(BaseMonitor):
                            body=f"No Oil Rig buildings found on the landscape page ({self.landscape_url})."
                         )
 
-                # If no links found, refresh and retry
                 self.driver.refresh()
 
             except StaleElementReferenceException:
@@ -740,10 +776,8 @@ class OilRigMonitor(BaseMonitor):
     def _check_and_rebuild_oilrig(self, oilrig_url):
         """Checks abundance and triggers rebuild based on new logic."""
         try:
-            # 1. 取得 Crude oil abundance
             crude_abundance = None
             methane_abundance = None
-            # 找 Crude oil
             try:
                 crude_img = self.driver.find_element(By.XPATH, "//img[@alt='Crude oil']")
                 row_div = crude_img
@@ -759,7 +793,6 @@ class OilRigMonitor(BaseMonitor):
                 self.logger.error("  Crude oil abundance not found!")
                 return False
 
-            # 找 Methane
             try:
                 methane_img = self.driver.find_element(By.XPATH, "//img[@alt='Methane']")
                 row_div = methane_img
@@ -776,12 +809,10 @@ class OilRigMonitor(BaseMonitor):
 
             self.logger.info(f"  Crude oil abundance: {crude_abundance}, Methane abundance: {methane_abundance}")
 
-            # 1. crude oil abundance > 95，通知並等待
             if crude_abundance is not None and crude_abundance > 95:
                 self.logger.info(f"  Crude oil abundance > 95, no rebuild needed.")
                 return False
 
-            # 2. crude oil abundance 80~95，點擊兩次rebuild
             if crude_abundance is not None and 80 < crude_abundance <= 95:
                 self.logger.info(f"  Crude oil abundance between 80 and 95, clicking rebuild twice.")
                 for i in range(2):
@@ -804,12 +835,9 @@ class OilRigMonitor(BaseMonitor):
                         self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
                         break
                 time.sleep(2)
-                # rebuild後driver會自動回首頁，不要quit，直接return True讓外層重新搜尋
                 return True
 
-            # 3. crude oil abundance <= 80
             if crude_abundance is not None and crude_abundance <= 80:
-                # 檢查 methane abundance
                 if methane_abundance is not None and methane_abundance > 80:
                     self.logger.info(f"  Crude oil <= 80, Methane > 80, clicking rebuild twice.")
                     for i in range(2):
@@ -832,7 +860,6 @@ class OilRigMonitor(BaseMonitor):
                             self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
                             break
                     time.sleep(2)
-                    # rebuild後driver會自動回首頁，不要quit，直接return True讓外層重新搜尋
                     return True
                 else:
                     self.logger.info(f"  Crude oil <= 80, Methane <= 80 or not found, clicking rebuild once.")
@@ -854,10 +881,8 @@ class OilRigMonitor(BaseMonitor):
                     except TimeoutException:
                         self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
                     time.sleep(2)
-                    # rebuild後driver會自動回首頁，不要quit，直接return True讓外層重新搜尋
                     return True
 
-            # 其他情況
             self.logger.info(f"  No rebuild action taken.")
             return False
 
@@ -889,6 +914,8 @@ class OilRigMonitor(BaseMonitor):
 # --- Main Execution ---
 def main():
     """Main function to select and run monitoring tasks."""
+    load_dotenv()
+
     print("Please select the function to execute:")
     print("1. Monitor Forest nursery production completion time")
     print("2. Batch start Power plant 24h production cycle")
@@ -897,22 +924,31 @@ def main():
     choice = input("Enter a number (1/2/3/4):").strip()
 
     if choice == "1":
-        logger = setup_logger("production_monitor.forest", "monitor_forest.log")
-        fn_paths = ["/b/43694783/"]
-        monitor = ForestNurseryMonitor(fn_paths, logger=logger)
+        logger_forest = setup_logger('ForestNurseryMonitor', 'monitor_forest.log')
+        target_paths_forest = ["/b/43694783/"]
+        user_data_dir_forest = os.getenv("USER_DATA_DIR_forestnursery")
+        if not user_data_dir_forest:
+            logger_forest.warning("USER_DATA_DIR_forestnursery not found in .env. Using default Chrome profile.")
+        monitor = ForestNurseryMonitor(target_paths_forest, logger=logger_forest, user_data_dir=user_data_dir_forest)
         monitor.run()
     elif choice == "2":
-        logger = setup_logger("production_monitor.powerplant", "monitor_powerplant.log")
+        logger_power = setup_logger('PowerPlantProducer', 'monitor_powerplant.log')
         pp_paths = [
             "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
             "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
             "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
         ]
-        producer = PowerPlantProducer(pp_paths, logger=logger)
+        user_data_dir_powerplant = os.getenv("USER_DATA_DIR_powerplant")
+        if not user_data_dir_powerplant:
+            logger_power.warning("USER_DATA_DIR_powerplant not found in .env. Using default Chrome profile.")
+        producer = PowerPlantProducer(pp_paths, logger=logger_power, user_data_dir=user_data_dir_powerplant)
         producer.run()
     elif choice == "3":
-        logger = setup_logger("production_monitor.oilrig", "monitor_oilrig.log")
-        monitor = OilRigMonitor(logger=logger)
+        logger_oil = setup_logger('OilRigMonitor', 'monitor_oilrig.log')
+        user_data_dir_oilrig = os.getenv("USER_DATA_DIR_oiirig")
+        if not user_data_dir_oilrig:
+            logger_oil.warning("USER_DATA_DIR_oiirig not found in .env. Using default Chrome profile.")
+        monitor = OilRigMonitor(logger=logger_oil, user_data_dir=user_data_dir_oilrig)
         monitor.run()
     elif choice == "4":
         logger = setup_logger("production_monitor.emailtest", "monitor_emailtest.log")

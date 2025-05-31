@@ -7,11 +7,12 @@ from filelock import FileLock
 
 load_dotenv() # Load environment variables from .env file
 
-def initialize_driver(user_data_dir_env_var="USER_DATA_DIR", profile_dir="Default"):
+def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR", profile_dir="Default"):
     """
     Initializes and returns a Selenium WebDriver instance.
 
     Args:
+        user_data_dir (str): The user data directory path. If provided, takes precedence over env var.
         user_data_dir_env_var (str): The environment variable name for the user data directory.
         profile_dir (str): The profile directory to use.
 
@@ -29,7 +30,9 @@ def initialize_driver(user_data_dir_env_var="USER_DATA_DIR", profile_dir="Defaul
         options.add_argument('--disable-extensions') # Added for stability
         options.add_experimental_option("excludeSwitches", ["enable-logging"])
 
-        user_data_dir = os.getenv(user_data_dir_env_var)
+        # 新增: 支援直接傳 user_data_dir 參數
+        if user_data_dir is None:
+            user_data_dir = os.getenv(user_data_dir_env_var)
 
         if user_data_dir and os.path.exists(user_data_dir):
             try:
@@ -55,7 +58,7 @@ def initialize_driver(user_data_dir_env_var="USER_DATA_DIR", profile_dir="Defaul
                 return driver
         else:
             if not user_data_dir:
-                print(f"[警告] 環境變數 {user_data_dir_env_var} 未設置。")
+                print(f"[警告] 未指定 user_data_dir 或環境變數 {user_data_dir_env_var} 未設置。")
             elif not os.path.exists(user_data_dir):
                 print(f"[警告] 指定的 USER_DATA_DIR 路徑不存在: {user_data_dir}")
             print("[資訊] 將使用預設 profile 啟動 Chrome。")
