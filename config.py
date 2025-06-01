@@ -48,6 +48,12 @@ PRODUCT_CONFIGS = [
         "quality": 0,
         "max_buy_quantity": 100
     },
+    {
+        "name":"ChemistryResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/34/",
+        "quality": 0,
+        "max_buy_quantity": 100
+    },
 
     # Example of adding a new product:
     # {

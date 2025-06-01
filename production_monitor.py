@@ -309,40 +309,74 @@ class ForestNurseryMonitor(BaseMonitor):
             ).click()
             time.sleep(0.5)
 
-            nurture_btn = WebDriverWait(self.driver, 10).until( # Reduced wait
-               EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]"))
-            )
-            if nurture_btn.is_enabled():
-                nurture_btn.click()
-                time.sleep(1)
-
-                try: # Check for "Not enough input resources"
-                    WebDriverWait(self.driver, 2).until(
-                        EC.visibility_of_element_located((By.XPATH, "//div[contains(text(), 'Not enough input resources')]"))
-                    )
-                    self.logger.warning(f"{target_path} Not enough resources, attempting to click 'Cut down'.")
-                    WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
-                    ).click()
+            try: # Added try-except for Nurture button
+                nurture_btn = WebDriverWait(self.driver, 10).until( # Reduced wait
+                   EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]"))
+                )
+                if nurture_btn.is_enabled():
+                    nurture_btn.click()
                     time.sleep(1)
-                    WebDriverWait(self.driver, 5).until(
-                        EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
-                    ).click()
-                    self.logger.info(f"{target_path} 'Cut down' clicked. Restarting monitoring.")
-                    return "RESTART"
-                except TimeoutException:
-                    self.logger.info(f"{target_path} Automatically clicked Max and started Nurture.")
-                    # Navigate back if needed, as Nurture might redirect
-                    current_url = self.driver.current_url
-                    if target_path not in current_url:
-                        self.logger.info(f"After Nurture, navigating back to {self.base_url + target_path}")
-                        self.driver.get(self.base_url + target_path)
-                        time.sleep(3)
-                    return "NURTURED"
 
-        except TimeoutException:
-            self.logger.info(f"{target_path} Could not find Nurture or Max button, checking for resource errors before expected completion time.")
-            # 檢查是否有 "Not enough input resources of quality 5 available" 或 "Water missing"
+                    try: # Check for "Not enough input resources"
+                        WebDriverWait(self.driver, 2).until(
+                            EC.visibility_of_element_located((By.XPATH, "//div[contains(text(), 'Not enough input resources')]"))
+                        )
+                        self.logger.warning(f"{target_path} Not enough resources, attempting to click 'Cut down'.")
+                        try: # Added try-except for Cut down button after "Not enough resources"
+                            WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
+                            ).click()
+                            time.sleep(1)
+                            WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
+                            ).click()
+                            self.logger.info(f"{target_path} 'Cut down' clicked. Restarting monitoring.")
+                            return "RESTART"
+                        except TimeoutException:
+                            self.logger.error(f"{target_path} Failed to click 'Cut down' after 'Not enough resources' message (Timeout).")
+                    except TimeoutException:
+                        self.logger.info(f"{target_path} Automatically clicked Max and started Nurture.")
+                        # Navigate back if needed, as Nurture might redirect
+                        current_url = self.driver.current_url
+                        if target_path not in current_url:
+                            self.logger.info(f"After Nurture, navigating back to {self.base_url + target_path}")
+                            self.driver.get(self.base_url + target_path)
+                            time.sleep(3)
+                        return "NURTURED"
+            except TimeoutException: # Catch TimeoutException for Nurture button
+                self.logger.info(f"{target_path} Could not find Nurture button (Timeout). Checking for resource errors.")
+                # The rest of the original TimeoutException block for Nurture follows
+                # Check for "Not enough input resources of quality 5 available" or "Water missing"
+                try:
+                    error_elements_5 = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Not enough input resources of quality 5 available')]")
+                    error_elements_water = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Water missing')]")
+                    if error_elements_5 or error_elements_water:
+                        msg = "'Not enough input resources of quality 5 available'" if error_elements_5 else "'Water missing'"
+                        self.logger.warning(f"{target_path} Detected {msg}, attempting to click 'Cut down'.")
+                        try: # Added try-except for Cut down button after specific resource error
+                            WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
+                            ).click()
+                            time.sleep(1)
+                            WebDriverWait(self.driver, 5).until(
+                                EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
+                            ).click()
+                            self.logger.info(f"{target_path} 'Cut down' clicked due to resource error. Restarting monitoring.")
+                            return "RESTART"
+                        except TimeoutException: # Catch TimeoutException for Cut down button
+                            self.logger.error(f"{target_path} Failed to click 'Cut down' after resource error (Timeout).")
+                        except Exception as e: # Catch other exceptions for Cut down
+                            self.logger.error(f"{target_path} Failed to click 'Cut down' after resource error: {e}", exc_info=False) # Set exc_info=False
+                    else:
+                        self.logger.info(f"{target_path} No 'Not enough input resources of quality 5 available' or 'Water missing' message found.")
+                except Exception as e:
+                    self.logger.error(f"{target_path} Error while checking for resource error: {e}", exc_info=False) # Set exc_info=False
+
+        except TimeoutException: # This is the original TimeoutException for Max button
+            self.logger.info(f"{target_path} Could not find Max button (Timeout), checking for resource errors before expected completion time.")
+            # ... (rest of the original logic for when Max button is not found)
+            # The nested try-except for resource errors and cut down is already here
+            # We need to ensure its Cut Down attempt also has simplified error logging for Timeout
             try:
                 error_elements_5 = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Not enough input resources of quality 5 available')]")
                 error_elements_water = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Water missing')]")
@@ -359,14 +393,16 @@ class ForestNurseryMonitor(BaseMonitor):
                         ).click()
                         self.logger.info(f"{target_path} 'Cut down' clicked due to resource error. Restarting monitoring.")
                         return "RESTART"
+                    except TimeoutException: # Catch TimeoutException for Cut down button
+                        self.logger.error(f"{target_path} Failed to click 'Cut down' after resource error (Timeout).")
                     except Exception as e:
-                        self.logger.error(f"{target_path} Failed to click 'Cut down' after resource error: {e}", exc_info=True)
+                        self.logger.error(f"{target_path} Failed to click 'Cut down' after resource error: {e}", exc_info=False) # Set exc_info=False
                 else:
                     self.logger.info(f"{target_path} No 'Not enough input resources of quality 5 available' or 'Water missing' message found.")
             except Exception as e:
-                self.logger.error(f"{target_path} Error while checking for resource error: {e}", exc_info=True)
+                self.logger.error(f"{target_path} Error while checking for resource error: {e}", exc_info=False) # Set exc_info=False
         except Exception as e:
-            self.logger.error(f"Error occurred while trying Nurture/Cut down for {target_path}: {e}", exc_info=True)
+            self.logger.error(f"Error occurred while trying Nurture/Cut down for {target_path}: {e}", exc_info=False) # Set exc_info=False
         return "NONE"
 
 
