@@ -37,7 +37,7 @@ class AutoBuyer:
         self.MARKET_HEADERS = market_headers
         self.session = requests.Session() # Keep requests session for market data fetching
         self.session.headers.update(self.MARKET_HEADERS)
-        self.driver = drivers # Initialize driver to None, will be created in main_loop
+        self.driver = None # Initialize driver to None, will be created in main_loop
         # --- Add market data cache ---
         self._market_data_cache = {}  # key: (product_name, quality), value: (timestamp, data)
         self._market_data_cache_ttl = 60  # seconds, adjust as needed
