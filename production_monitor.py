@@ -41,7 +41,7 @@ def setup_logger(name, log_filename):
 # --- Constants ---
 BASE_URL = "https://www.simcompanies.com"
 DEFAULT_RETRY_DELAY = 60  # seconds
-LONG_RETRY_DELAY = 3600 # seconds (1 hour)
+LONG_RETRY_DELAY = 100 # seconds 
 CONSTRUCTION_CHECK_BUFFER = 60 # seconds
 PRODUCTION_CHECK_BUFFER = 60 # seconds
 REBUILD_DELAY = 60 # seconds
@@ -608,10 +608,24 @@ class PowerPlantProducer(BaseMonitor):
                 WebDriverWait(self.driver, 5).until(
                     EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]"))
                 ).click()
-                self.logger.info(f"{path} Automatically started 24h production!")
-                time.sleep(2) # Wait for finish time to appear
-                self._get_existing_finish_time(path, finish_times) # Get time after starting
-                return True # Started production
+                self.logger.info(f"{path} 'Produce' button clicked. Verifying production status...")
+                time.sleep(2) # Wait for page to update
+
+                # Verify if "Cancel Production" button is present
+                try:
+                    WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]"))
+                    )
+                    self.logger.info(f"{path} Production successfully started (Cancel Production button found).")
+                    self._get_existing_finish_time(path, finish_times) # Get time after starting
+                    return True # Started production
+                except TimeoutException:
+                    self.logger.warning(f"{path} Failed to confirm production start. 'Cancel Production' button not found after timeout.")
+                    return False
+                except Exception as e_verify:
+                    self.logger.error(f"{path} Error verifying production start: {e_verify}")
+                    return False
+
             except Exception as e_start:
                 self.logger.error(f"Failed to start production for {path}: {e_start}")
                 return False
