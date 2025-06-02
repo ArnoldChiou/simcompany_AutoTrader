@@ -611,6 +611,12 @@ class PowerPlantProducer(BaseMonitor):
                 self.logger.info(f"{path} 'Produce' button clicked. Verifying production status...")
                 time.sleep(2) # Wait for page to update
 
+                # Navigate back to the building page to verify
+                building_url = self.base_url + path
+                self.logger.info(f"Navigating back to {building_url} to verify production status.")
+                self.driver.get(building_url)
+                time.sleep(2) # Allow page to load
+
                 # Verify if "Cancel Production" button is present
                 try:
                     WebDriverWait(self.driver, 5).until(
