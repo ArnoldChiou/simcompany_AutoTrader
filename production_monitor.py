@@ -278,14 +278,19 @@ class ForestNurseryMonitor(BaseMonitor):
     def _check_construction(self, target_path, construction_finish_times):
         """Checks if a building is under construction."""
         try:
-            self.driver.find_element(By.XPATH, "//h3[normalize-space(text())='Construction']")
-            finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+            # Use WebDriverWait to wait for the Construction header
+            WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
+            )
+            finish_time_p = WebDriverWait(self.driver, 5).until(
+                EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
+            )
             finish_time_str = finish_time_p.text.strip().replace('Finishes at', '').strip()
             self.logger.info(f"{target_path} is under construction, expected completion time: {finish_time_str}")
             finish_dt = parser.parse(finish_time_str)
             construction_finish_times.append(finish_dt)
             return True
-        except NoSuchElementException:
+        except TimeoutException:
             self.logger.info(f"{target_path} is not under construction, checking production status...")
             return False
         except Exception as e:
@@ -314,10 +319,13 @@ class ForestNurseryMonitor(BaseMonitor):
         # 先檢查是否正在生產中，若是則直接 return "NONE"
         try:
             self.driver.get(self.base_url + target_path)
-            self.driver.find_element(By.XPATH, "//button[contains(., 'Cancel Nurturing') and contains(@class, 'btn-secondary')]")
+            # Use WebDriverWait to check for Cancel Nurturing button
+            WebDriverWait(self.driver, 3).until(
+                EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Cancel Nurturing') and contains(@class, 'btn-secondary')]"))
+            )
             self.logger.info(f"{target_path} is producing (Cancel Nurturing button found), skip cut down.")
             return "NONE"
-        except NoSuchElementException:
+        except TimeoutException:
             pass
 
         try:
@@ -373,9 +381,11 @@ class ForestNurseryMonitor(BaseMonitor):
     def _check_cancel_nurturing(self):
         """Checks if the Cancel Nurturing button is present (production started)."""
         try:
-            self.driver.find_element(By.XPATH, "//button[contains(., 'Cancel Nurturing') and contains(@class, 'btn-secondary')]")
+            WebDriverWait(self.driver, 3).until(
+                EC.presence_of_element_located((By.XPATH, "//button[contains(., 'Cancel Nurturing') and contains(@class, 'btn-secondary')]"))
+            )
             return True
-        except NoSuchElementException:
+        except TimeoutException:
             return False
 
     def _retry_nurture_until_success(self, target_path, max_retries=5):
@@ -431,7 +441,9 @@ class ForestNurseryMonitor(BaseMonitor):
 
             # Fallback: Search all <p> tags if not found above
             if not finish_time_str:
-                all_p_tags = self.driver.find_elements(By.TAG_NAME, 'p')
+                all_p_tags = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_all_elements_located((By.TAG_NAME, 'p'))
+                )
                 for p in all_p_tags:
                     text = p.text.strip()
                     if ('/' in text and ':' in text) or ('Finishes at' in text):
@@ -569,10 +581,14 @@ class PowerPlantProducer(BaseMonitor):
             self.logger.critical(f"[{self.name}] Unhandled error in processing loop: {e_main}", exc_info=True)
             error_occurred = True
         finally:
+            # After main production attempt, verify all are producing
+            self._verify_all_producing(retry_limit=2)
             self._quit_driver()
 
         if error_occurred:
             return DEFAULT_RETRY_DELAY * 5
+
+        
 
         # Calculate min wait time
         min_wait = None
@@ -600,7 +616,9 @@ class PowerPlantProducer(BaseMonitor):
         """Checks if production is running, if not, starts 24h production."""
         try:
             # Check if 'Finishes at' exists
-            self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
+            )
             self.logger.info(f"{path} is already producing.")
             return False # Already producing, will try to get time later
         except NoSuchElementException:
@@ -644,7 +662,9 @@ class PowerPlantProducer(BaseMonitor):
     def _get_existing_finish_time(self, path, finish_times):
         """Gets the 'Finishes at' time if it exists."""
         try:
-            p_tags = self.driver.find_elements(By.TAG_NAME, 'p')
+            p_tags = WebDriverWait(self.driver, 5).until(
+                EC.presence_of_all_elements_located((By.TAG_NAME, 'p'))
+            )
             for p in p_tags:
                 if p.text.strip().startswith('Finishes at'):
                     finish_time = p.text.strip()
@@ -656,6 +676,41 @@ class PowerPlantProducer(BaseMonitor):
         except Exception as e:
             self.logger.error(f"Failed to fetch completion time for {path}: {e}")
             return False
+
+    def _is_producing(self, path):
+        """Checks if the power plant at the given path is producing (Cancel Production button present)."""
+        try:
+            self.driver.get(self.base_url + path)
+            WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]"))
+                    )
+            return True
+        except NoSuchElementException:
+            return False
+        except Exception as e:
+            self.logger.error(f"Error checking production status for {path}: {e}")
+            return False
+
+    def _verify_all_producing(self, retry_limit=2):
+        """Verifies all power plants are producing. Retries starting production if not."""
+        for attempt in range(1, retry_limit+1):
+            not_producing = []
+            for idx, path in enumerate(self.target_paths):
+                self.driver.switch_to.window(self.driver.window_handles[idx])
+                if not self._is_producing(path):
+                    self.logger.warning(f"{path} is NOT producing after attempt {attempt}. Retrying start...")
+                    self._check_and_start_production(path, [])
+                    not_producing.append(path)
+                else:
+                    self.logger.info(f"{path} is confirmed producing.")
+            if not not_producing:
+                self.logger.info("All power plants are confirmed producing.")
+                return True
+            else:
+                self.logger.warning(f"Retrying for {len(not_producing)} plants not producing. Attempt {attempt}/{retry_limit}.")
+        if not_producing:
+            self.logger.error(f"After {retry_limit} retries, the following plants are still NOT producing: {not_producing}")
+        return False
 
 
 # --- Oil Rig Monitor ---
@@ -792,10 +847,9 @@ class OilRigMonitor(BaseMonitor):
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
-                WebDriverWait(self.driver, 30).until(EC.presence_of_element_located((By.TAG_NAME, "a")))
-                time.sleep(5)
-
-                a_tags = self.driver.find_elements(By.TAG_NAME, "a")
+                a_tags = WebDriverWait(self.driver, 10).until(
+                    EC.presence_of_all_elements_located((By.TAG_NAME, "a"))
+                )
                 links = []
                 for a in a_tags:
                     href = a.get_attribute('href')
@@ -846,13 +900,19 @@ class OilRigMonitor(BaseMonitor):
             crude_abundance = None
             methane_abundance = None
             try:
-                crude_img = self.driver.find_element(By.XPATH, "//img[@alt='Crude oil']")
+                crude_img = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//img[@alt='Crude oil']"))
+                )
                 row_div = crude_img
                 for _ in range(5):
-                    row_div = row_div.find_element(By.XPATH, "..")
+                    row_div = WebDriverWait(row_div, 2).until(
+                        EC.presence_of_element_located((By.XPATH, ".."))
+                    )
                     if 'row' in row_div.get_attribute('class'):
                         break
-                abundance_span = row_div.find_element(By.XPATH, ".//span[contains(text(), 'Abundance:')]")
+                abundance_span = WebDriverWait(row_div, 2).until(
+                    EC.presence_of_element_located((By.XPATH, ".//span[contains(text(), 'Abundance:')]"))
+                )
                 match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
                 if match:
                     crude_abundance = float(match.group(1))
@@ -861,13 +921,19 @@ class OilRigMonitor(BaseMonitor):
                 return False
 
             try:
-                methane_img = self.driver.find_element(By.XPATH, "//img[@alt='Methane']")
+                methane_img = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//img[@alt='Methane']"))
+                )
                 row_div = methane_img
                 for _ in range(5):
-                    row_div = row_div.find_element(By.XPATH, "..")
+                    row_div = WebDriverWait(row_div, 2).until(
+                        EC.presence_of_element_located((By.XPATH, ".."))
+                    )
                     if 'row' in row_div.get_attribute('class'):
                         break
-                abundance_span = row_div.find_element(By.XPATH, ".//span[contains(text(), 'Abundance:')]")
+                abundance_span = WebDriverWait(row_div, 2).until(
+                    EC.presence_of_element_located((By.XPATH, ".//span[contains(text(), 'Abundance:')]"))
+                )
                 match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
                 if match:
                     methane_abundance = float(match.group(1))
