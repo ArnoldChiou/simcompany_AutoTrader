@@ -1,6 +1,9 @@
 # run_all.ps1
 # Execute all functions of main.py sequentially (excluding Login to game)
 
+# Kill any leftover Chrome or Chromedriver processes before starting
+Get-Process -Name chrome, chromedriver -ErrorAction SilentlyContinue | ForEach-Object { try { $_.Kill() } catch {} }
+
 Remove-Item -ErrorAction SilentlyContinue "record/monitor_forest.log"
 Remove-Item -ErrorAction SilentlyContinue "record/monitor_powerplant.log"
 Remove-Item -ErrorAction SilentlyContinue "record/monitor_oilrig.log"
@@ -33,8 +36,8 @@ foreach ($jobDef in $jobDefinitions) {
         $maxTries = 5
         for ($try = 1; $try -le $maxTries; $try++) {
             if (Get-Process -Name chrome, chromedriver -ErrorAction SilentlyContinue) {
-                for ($sec = 1; $sec -le 10; $sec++) {
-                    Write-Host "Selenium/Chrome is still running, waiting ($sec/10) seconds before starting $($jobDef.name)... (try $try/$maxTries)"
+                for ($sec = 1; $sec -le 20; $sec++) {
+                    Write-Host "Selenium/Chrome is still running, waiting ($sec/20) seconds before starting $($jobDef.name)... (try $try/$maxTries)"
                     Start-Sleep -Seconds 1
                 }
                 $canStart = $false
