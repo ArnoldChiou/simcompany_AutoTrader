@@ -520,6 +520,7 @@ class PowerPlantProducer(BaseMonitor):
         finish_times = []
         now = datetime.datetime.now()
         error_occurred = False
+        started_paths = []  # 新增: 記錄有按生產按鈕的path
 
         try:
             # Open all tabs first
@@ -532,11 +533,33 @@ class PowerPlantProducer(BaseMonitor):
                 time.sleep(0.3)
 
             handles = self.driver.window_handles  # Always refresh handles after (re)opening tabs
-            for idx in range(len(handles)):
+            num_targets = len(self.target_paths)
+            for idx in range(num_targets):
                 retry_count = 0
                 while retry_count < 2:  # Try at most twice per tab
                     try:
-                        self.driver.switch_to.window(self.driver.window_handles[idx])  # Use fresh handles
+                        handles = self.driver.window_handles
+                        if idx >= len(handles):
+                            self.logger.error(f"Tab index {idx} out of range for window handles (have {len(handles)} tabs, expected {num_targets}). Re-opening all tabs.")
+                            # Re-open all tabs for all target_paths
+                            self._quit_driver()
+                            if not self._initialize_driver():
+                                self.logger.error(f"[{self.name}] Failed to re-initialize driver for tab count mismatch.")
+                                error_occurred = True
+                                break
+                            for reopen_idx, reopen_path in enumerate(self.target_paths):
+                                url = self.base_url + reopen_path
+                                if reopen_idx == 0:
+                                    self.driver.get(url)
+                                else:
+                                    self.driver.execute_script(f"window.open('{url}', '_blank');")
+                                time.sleep(0.3)
+                            handles = self.driver.window_handles
+                            if idx >= len(handles):
+                                self.logger.error(f"After re-opening, still not enough tabs. Skipping tab {idx}.")
+                                error_occurred = True
+                                break
+                        self.driver.switch_to.window(handles[idx])  # Use fresh handles
                         current_path = self.target_paths[idx]  # Assuming order matches
                         self.logger.info(f"[{self.name}] Processing: {current_path}")
                         WebDriverWait(self.driver, 20).until(
@@ -544,8 +567,11 @@ class PowerPlantProducer(BaseMonitor):
                         )
                         time.sleep(0.5)
 
-                        if not self._check_and_start_production(current_path, finish_times):
+                        started = self._check_and_start_production(current_path, finish_times)
+                        if not started:
                             self._get_existing_finish_time(current_path, finish_times)
+                        else:
+                            started_paths.append(current_path)
                         break  # Success, break retry loop
                     except (WebDriverException, ConnectionResetError, Exception) as e_wd:
                         self.logger.error(f"[{self.name}] WebDriver/connection error processing tab {idx} (attempt {retry_count+1}): {e_wd}", exc_info=True)
@@ -560,15 +586,14 @@ class PowerPlantProducer(BaseMonitor):
                                 self.logger.error(f"[{self.name}] Failed to re-initialize driver on retry.")
                                 error_occurred = True
                                 break
-                            # Re-open all tabs up to current
-                            for reopen_idx in range(idx+1):
-                                url = self.base_url + self.target_paths[reopen_idx]
+                            # Re-open all tabs for all target_paths
+                            for reopen_idx, reopen_path in enumerate(self.target_paths):
+                                url = self.base_url + reopen_path
                                 if reopen_idx == 0:
                                     self.driver.get(url)
                                 else:
                                     self.driver.execute_script(f"window.open('{url}', '_blank');")
                                 time.sleep(0.3)
-                            # Refresh handles after re-opening
                             handles = self.driver.window_handles
                         else:
                             error_occurred = True
@@ -581,14 +606,13 @@ class PowerPlantProducer(BaseMonitor):
             self.logger.critical(f"[{self.name}] Unhandled error in processing loop: {e_main}", exc_info=True)
             error_occurred = True
         finally:
-            # After main production attempt, verify all are producing
-            self._verify_all_producing(retry_limit=2)
+            # After main production attempt, verify only those with production started
+            if started_paths:
+                self._verify_all_producing(started_paths, retry_limit=2)
             self._quit_driver()
 
         if error_occurred:
             return DEFAULT_RETRY_DELAY * 5
-
-        
 
         # Calculate min wait time
         min_wait = None
@@ -621,16 +645,16 @@ class PowerPlantProducer(BaseMonitor):
             )
             self.logger.info(f"{path} is already producing.")
             return False # Already producing, will try to get time later
-        except NoSuchElementException:
+        except TimeoutException:
             # Not producing, try to start
             try:
                 self.logger.info(f"{path} is not producing, attempting to start 24h production...")
                 WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]"))
-                ).click()
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., '24h')]")
+                )).click()
                 WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]"))
-                ).click()
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Produce')]")
+                )).click()
                 self.logger.info(f"{path} 'Produce' button clicked. Verifying production status...")
                 time.sleep(2) # Wait for page to update
 
@@ -658,6 +682,9 @@ class PowerPlantProducer(BaseMonitor):
             except Exception as e_start:
                 self.logger.error(f"Failed to start production for {path}: {e_start}")
                 return False
+        except Exception as e:
+            self.logger.error(f"Unexpected error in _check_and_start_production for {path}: {e}")
+            raise
 
     def _get_existing_finish_time(self, path, finish_times):
         """Gets the 'Finishes at' time if it exists."""
@@ -691,11 +718,15 @@ class PowerPlantProducer(BaseMonitor):
             self.logger.error(f"Error checking production status for {path}: {e}")
             return False
 
-    def _verify_all_producing(self, retry_limit=2):
-        """Verifies all power plants are producing. Retries starting production if not."""
+    def _verify_all_producing(self, started_paths, retry_limit=2):
+        """只檢查有按生產按鈕的power plant是否真的有生產，沒按的不檢查。"""
+        if not started_paths:
+            self.logger.info("No plants had production started, skipping verification.")
+            return True
         for attempt in range(1, retry_limit+1):
             not_producing = []
-            for idx, path in enumerate(self.target_paths):
+            for path in started_paths:
+                idx = self.target_paths.index(path)
                 self.driver.switch_to.window(self.driver.window_handles[idx])
                 if not self._is_producing(path):
                     self.logger.warning(f"{path} is NOT producing after attempt {attempt}. Retrying start...")
@@ -704,12 +735,12 @@ class PowerPlantProducer(BaseMonitor):
                 else:
                     self.logger.info(f"{path} is confirmed producing.")
             if not not_producing:
-                self.logger.info("All power plants are confirmed producing.")
+                self.logger.info("All started power plants are confirmed producing.")
                 return True
             else:
                 self.logger.warning(f"Retrying for {len(not_producing)} plants not producing. Attempt {attempt}/{retry_limit}.")
         if not_producing:
-            self.logger.error(f"After {retry_limit} retries, the following plants are still NOT producing: {not_producing}")
+            self.logger.error(f"After {retry_limit} retries, the following started plants are still NOT producing: {not_producing}")
         return False
 
 
