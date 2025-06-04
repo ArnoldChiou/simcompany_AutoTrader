@@ -338,7 +338,7 @@ class ForestNurseryMonitor(BaseMonitor):
                     WebDriverWait(self.driver, 2).until(
                         EC.visibility_of_element_located((By.XPATH, "//div[contains(text(), 'Not enough input resources')]")
                     ))
-                    self.logger.warning(f"{target_path} Not enough resources, attempting to click 'Cut down'.")
+                    self.logger.info(f"{target_path} Not enough resources, attempting to click 'Cut down'.")
                     if self._click_cutdown(target_path):
                         return self._retry_nurture_until_success(target_path)
                 except TimeoutException:
@@ -347,7 +347,7 @@ class ForestNurseryMonitor(BaseMonitor):
                         self.logger.info(f"{target_path} Nurture started successfully after Max.")
                         return "NURTURED"
                     else:
-                        self.logger.warning(f"{target_path} Nurture did not start, retrying...")
+                        self.logger.info(f"{target_path} Nurture did not start, retrying...")
                         return self._retry_nurture_until_success(target_path)
             else:
                 # Could not find Nurture button, check for resource errors
@@ -355,7 +355,7 @@ class ForestNurseryMonitor(BaseMonitor):
                 error_elements_water = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'Water missing')]")
                 if error_elements_5 or error_elements_water:
                     msg = "'Not enough input resources of quality 5 available'" if error_elements_5 else "'Water missing'"
-                    self.logger.warning(f"{target_path} Detected {msg}, attempting to click 'Cut down'.")
+                    self.logger.info(f"{target_path} Detected {msg}, attempting to click 'Cut down'.")
                     if self._click_cutdown(target_path):
                         return self._retry_nurture_until_success(target_path)
                 else:
@@ -367,15 +367,13 @@ class ForestNurseryMonitor(BaseMonitor):
     def _click_cutdown(self, target_path):
         """Clicks the Cut down button and confirms. Returns True if successful."""
         try:
-            WebDriverWait(self.driver, 5).until(
+            WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
             ).click()
-            time.sleep(1)
-            WebDriverWait(self.driver, 5).until(
+            WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-danger') and normalize-space(.)='Cut down']"))
             ).click()
             self.logger.info(f"{target_path} 'Cut down' clicked. Will retry Nurture.")
-            time.sleep(2)
             return True
         except Exception as e:
             self.logger.error(f"{target_path} Failed to click 'Cut down': {e}", exc_info=False)
