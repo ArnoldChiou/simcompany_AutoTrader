@@ -1167,19 +1167,6 @@ class OilRigMonitor(BaseMonitor):
                     )
                     rebuild_btn.click()
                     self.logger.info(f"  Rebuild clicked.")
-                    try:
-                        modal = WebDriverWait(self.driver, 3).until(
-                            EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
-                        )
-                        confirm_btn = WebDriverWait(self.driver, 5).until(
-                            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
-                        )
-                        confirm_btn.click()
-                        self.logger.info(f"  Confirmation modal 'Rebuild' clicked.")
-                        time.sleep(1)
-                    except TimeoutException:
-                        self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
-                    time.sleep(2)
                     return True
 
             self.logger.info(f"  No rebuild action taken.")
