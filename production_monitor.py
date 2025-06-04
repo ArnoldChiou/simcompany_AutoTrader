@@ -728,7 +728,7 @@ class PowerPlantProducer(BaseMonitor):
 
             WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Produce']"))).click()
             self.logger.info(f"[{self.name}] {path} 'Produce' button clicked. Verifying production start...")
-
+            self.driver.get(current_building_url) # 確保在正確的頁面上
             # WebDriverWait 超時維持15s，因為這一步是等待伺服器響應和頁面更新的關鍵
             confirmation_element = WebDriverWait(self.driver, 15).until(
                 EC.any_of(
