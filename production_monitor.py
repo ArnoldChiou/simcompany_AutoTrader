@@ -966,6 +966,10 @@ class OilRigMonitor(BaseMonitor):
                             self._quit_driver()
                             time.sleep(3600)
                             return 3600
+                        elif abundance_result is False:
+                            self.logger.warning(f"[{self.name}] Error occurred while checking Abundance or Rebuild, will immediately retry the check cycle.")
+                            time.sleep(3)  # short sleep to avoid rapid loop
+                            continue  # restart the while True loop for immediate retry
 
                     except Exception as e_constr:
                         self.logger.error(f"  Error occurred while checking construction status for {oilrig_url}: {e_constr}", exc_info=True)
@@ -1062,17 +1066,17 @@ class OilRigMonitor(BaseMonitor):
             crude_abundance = None
             methane_abundance = None
             try:
-                crude_img = WebDriverWait(self.driver, 5).until(
+                crude_img = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//img[@alt='Crude oil']"))
                 )
                 row_div = crude_img
                 for _ in range(5):
-                    row_div = WebDriverWait(row_div, 2).until(
+                    row_div = WebDriverWait(row_div, 10).until(
                         EC.presence_of_element_located((By.XPATH, ".."))
                     )
                     if 'row' in row_div.get_attribute('class'):
                         break
-                abundance_span = WebDriverWait(row_div, 2).until(
+                abundance_span = WebDriverWait(row_div, 10).until(
                     EC.presence_of_element_located((By.XPATH, ".//span[contains(text(), 'Abundance:')]"))
                 )
                 match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
@@ -1083,17 +1087,17 @@ class OilRigMonitor(BaseMonitor):
                 return False
 
             try:
-                methane_img = WebDriverWait(self.driver, 5).until(
+                methane_img = WebDriverWait(self.driver, 10).until(
                     EC.presence_of_element_located((By.XPATH, "//img[@alt='Methane']"))
                 )
                 row_div = methane_img
                 for _ in range(5):
-                    row_div = WebDriverWait(row_div, 2).until(
+                    row_div = WebDriverWait(row_div, 10).until(
                         EC.presence_of_element_located((By.XPATH, ".."))
                     )
                     if 'row' in row_div.get_attribute('class'):
                         break
-                abundance_span = WebDriverWait(row_div, 2).until(
+                abundance_span = WebDriverWait(row_div, 10).until(
                     EC.presence_of_element_located((By.XPATH, ".//span[contains(text(), 'Abundance:')]"))
                 )
                 match = re.search(r'Abundance:\s*([\d.]+)', abundance_span.text)
@@ -1121,10 +1125,10 @@ class OilRigMonitor(BaseMonitor):
                     rebuild_btn.click()
                     self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
                     try:
-                        modal = WebDriverWait(self.driver, 3).until(
+                        modal = WebDriverWait(self.driver, 10).until(
                             EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
                         )
-                        confirm_btn = WebDriverWait(self.driver, 5).until(
+                        confirm_btn = WebDriverWait(self.driver, 10).until(
                             EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
                         )
                         confirm_btn.click()
@@ -1166,6 +1170,7 @@ class OilRigMonitor(BaseMonitor):
                         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                     )
                     rebuild_btn.click()
+                    time.sleep(2)
                     self.logger.info(f"  Rebuild clicked.")
                     return True
 
