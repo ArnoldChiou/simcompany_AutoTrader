@@ -53,20 +53,6 @@ REBUILD_DELAY = 60 # seconds
 if not os.path.exists('record'):
     os.makedirs('record')
 
-# --- Helper Function for Beeping (Optional & Cross-Platform Safe) ---
-def play_notification_sound(logger, count=3, duration=500, frequency=1000):
-    """Plays a beep sound if possible (Windows only for now, safely skips otherwise)."""
-    try:
-        import winsound
-        logger.info("Playing notification sound (Windows only).")
-        for _ in range(count):
-            winsound.Beep(frequency, duration)
-            time.sleep(0.5)
-    except ImportError:
-        logger.warning("Could not import 'winsound'. Notification sounds disabled (not on Windows or module missing).")
-    except Exception as e:
-        logger.error(f"Error playing sound: {e}")
-
 # --- Base Monitor Class ---
 class BaseMonitor:
     """Base class for monitoring tasks."""
@@ -265,7 +251,6 @@ class ForestNurseryMonitor(BaseMonitor):
         wait_production = self._calculate_wait(production_finish_times, now_for_parsing, False)
 
         if wait_construction is not None:
-            play_notification_sound(self.logger)
             return wait_construction + CONSTRUCTION_CHECK_BUFFER
 
         if wait_production is not None:
@@ -704,7 +689,6 @@ class PowerPlantProducer(BaseMonitor):
         
         if found_active_production and min_wait_seconds != float('inf'):
             self.logger.info(f"[{self.name}] Earliest production finish time: {earliest_finish_dt_str}. Min wait: {min_wait_seconds:.0f} seconds.")
-            play_notification_sound(self.logger)
             return min_wait_seconds
         else:
             self.logger.info(f"[{self.name}] No active future production found, or all parsed times were in the past.")
