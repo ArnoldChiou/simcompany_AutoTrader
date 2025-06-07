@@ -397,7 +397,7 @@ class ForestNurseryMonitor(BaseMonitor):
     def _try_nurture_button_only(self):
         """Tries to click Nurture button only (assumes Max already set)."""
         try:
-            nurture_btn = WebDriverWait(self.driver, 5).until(
+            nurture_btn = WebDriverWait(self.driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]")
             ))
             if nurture_btn.is_enabled():
