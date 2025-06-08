@@ -4,8 +4,33 @@ from webdriver_manager.chrome import ChromeDriverManager
 import os
 from dotenv import load_dotenv # Import load_dotenv
 from filelock import FileLock
+import re
+import subprocess
 
 load_dotenv() # Load environment variables from .env file
+
+def get_installed_chrome_version():
+    try:
+        # Use reg query to get Chrome version from registry
+        output = subprocess.check_output(
+            r'reg query "HKEY_CURRENT_USER\Software\Google\Chrome\BLBeacon" /v version',
+            shell=True, encoding='utf-8', stderr=subprocess.DEVNULL
+        )
+        match = re.search(r'version\s+REG_SZ\s+([\d.]+)', output)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    # Fallback: try default install path
+    chrome_path = r'C:\Program Files\Google\Chrome\Application\chrome.exe'
+    try:
+        output = subprocess.check_output(f'"{chrome_path}" --version', shell=True, encoding='utf-8')
+        match = re.search(r'(\d+\.\d+\.\d+\.\d+)', output)
+        if match:
+            return match.group(1)
+    except Exception:
+        pass
+    return None
 
 def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR", profile_dir="Default"):
     """
@@ -39,7 +64,11 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
                 options.add_argument(f"user-data-dir={user_data_dir}")
                 options.add_argument(f"--profile-directory={profile_dir}")
                 print(f"[資訊] 嘗試使用 User Data Directory: {user_data_dir} 和 Profile: {profile_dir} 啟動 Chrome。")
-                driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+                chrome_version = get_installed_chrome_version()
+                if chrome_version:
+                    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(driver_version=chrome_version).install()), options=options)
+                else:
+                    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
                 print("[資訊] Chrome 使用指定的 User Data Directory 啟動成功。")
                 return driver
             except Exception as e:
@@ -54,7 +83,11 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
                 options.add_argument('--start-maximized') # Added for stability
                 options.add_argument('--disable-extensions') # Added for stability
                 options.add_experimental_option("excludeSwitches", ["enable-logging"])
-                driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+                chrome_version = get_installed_chrome_version()
+                if chrome_version:
+                    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(driver_version=chrome_version).install()), options=options)
+                else:
+                    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
                 return driver
         else:
             if not user_data_dir:
@@ -62,5 +95,9 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
             elif not os.path.exists(user_data_dir):
                 print(f"[警告] 指定的 USER_DATA_DIR 路徑不存在: {user_data_dir}")
             print("[資訊] 將使用預設 profile 啟動 Chrome。")
-            driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
+            chrome_version = get_installed_chrome_version()
+            if chrome_version:
+                driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(driver_version=chrome_version).install()), options=options)
+            else:
+                driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
             return driver

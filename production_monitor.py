@@ -696,54 +696,60 @@ class PowerPlantProducer(BaseMonitor):
 
     def _check_and_start_production(self, path, finish_times_list):
         current_building_url = self.base_url + path
-        try:
-            finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-            if finish_time_elements and finish_time_elements[0].is_displayed():
-                finish_time_str = finish_time_elements[0].text.strip()
-                self.logger.info(f"[{self.name}] {path} is ALREADY PRODUCING. Finish time: {finish_time_str}")
-                if finish_time_str not in finish_times_list: finish_times_list.append(finish_time_str)
-                return False
-
-            self.logger.info(f"[{self.name}] {path} is not producing, attempting to start 24h production...")
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='24h']"))).click()
-            time.sleep(random.uniform(0.2, 0.5)) # **縮短** 原 (0.4, 0.8)
-
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Produce']"))).click()
-            self.logger.info(f"[{self.name}] {path} 'Produce' button clicked. Verifying production start...")
-            self.driver.get(current_building_url) # 確保在正確的頁面上
-            # WebDriverWait 超時維持15s，因為這一步是等待伺服器響應和頁面更新的關鍵
-            confirmation_element = WebDriverWait(self.driver, 15).until(
-                EC.any_of(
-                    EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]")),
-                    EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
-                )
-            )
-            tag_name = confirmation_element.tag_name
-            text_preview = confirmation_element.text.strip()[:30] if confirmation_element.text else ""
-            self.logger.info(f"[{self.name}] {path} Production successfully STARTED or CONFIRMED by UI element: <{tag_name}>{text_preview}...")
-            
-            time.sleep(random.uniform(0.3, 0.7)) # **縮短** 原 (0.5,1.2)
-            new_finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-            if new_finish_time_elements and new_finish_time_elements[0].is_displayed():
-                new_finish_time_str = new_finish_time_elements[0].text.strip()
-                self.logger.info(f"[{self.name}] {path} New production finish time: {new_finish_time_str}")
-                if new_finish_time_str not in finish_times_list: finish_times_list.append(new_finish_time_str)
-            else:
-                self.logger.warning(f"[{self.name}] {path} Production confirmed, but 'Finishes at' text not immediately found/updated. Will rely on next cycle if needed.")
-            return True
-
-        except TimeoutException:
-            self.logger.warning(f"[{self.name}] {path} Timeout during production start/verification. Production might NOT have started.")
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
             try:
-                error_alerts = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'alert-danger') or contains(@class, 'alert-warning')]")
-                for alert in error_alerts:
-                    if alert.is_displayed():
-                        self.logger.warning(f"[{self.name}] {path} Found alert message on page: {alert.text.strip()}")
-            except Exception: pass
-            return False
-        except Exception as e:
-            self.logger.error(f"[{self.name}] Exception in _check_and_start_production for {path} (URL: {current_building_url}) (Type: {type(e).__name__}): {e}", exc_info=True)
-            return False
+                finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                if finish_time_elements and finish_time_elements[0].is_displayed():
+                    finish_time_str = finish_time_elements[0].text.strip()
+                    self.logger.info(f"[{self.name}] {path} is ALREADY PRODUCING. Finish time: {finish_time_str}")
+                    if finish_time_str not in finish_times_list: finish_times_list.append(finish_time_str)
+                    return False
+
+                self.logger.info(f"[{self.name}] {path} is not producing, attempting to start 24h production... (attempt {attempt}/{max_retries})")
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='24h']"))).click()
+                time.sleep(random.uniform(0.2, 0.5))
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='Produce']"))).click()
+                self.logger.info(f"[{self.name}] {path} 'Produce' button clicked. Verifying production start... (attempt {attempt}/{max_retries})")
+                time.sleep(random.uniform(0.5, 0.7))
+                self.driver.get(current_building_url)
+                confirmation_element = WebDriverWait(self.driver, 15).until(
+                    EC.any_of(
+                        EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]")),
+                        EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
+                    )
+                )
+                tag_name = confirmation_element.tag_name
+                text_preview = confirmation_element.text.strip()[:30] if confirmation_element.text else ""
+                self.logger.info(f"[{self.name}] {path} Production successfully STARTED or CONFIRMED by UI element: <{tag_name}>{text_preview}...")
+                time.sleep(random.uniform(0.3, 0.7))
+                new_finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                if new_finish_time_elements and new_finish_time_elements[0].is_displayed():
+                    new_finish_time_str = new_finish_time_elements[0].text.strip()
+                    self.logger.info(f"[{self.name}] {path} New production finish time: {new_finish_time_str}")
+                    if new_finish_time_str not in finish_times_list: finish_times_list.append(new_finish_time_str)
+                else:
+                    self.logger.warning(f"[{self.name}] {path} Production confirmed, but 'Finishes at' text not immediately found/updated. Will rely on next cycle if needed.")
+                return True
+            except TimeoutException:
+                self.logger.warning(f"[{self.name}] {path} Timeout during production start/verification. Production might NOT have started. (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    try:
+                        self.driver.get(current_building_url)
+                        time.sleep(random.uniform(0.3, 0.7))
+                    except Exception:
+                        pass
+                    continue
+                else:
+                    from email_utils import send_email_notify
+                    subject = f"[SimCompany PowerPlant] 連續{max_retries}次啟動生產失敗通知 ({path})"
+                    body = f"PowerPlant {path} 連續{max_retries}次點擊生產按鈕皆失敗，請手動檢查。\nURL: {current_building_url}"
+                    send_email_notify(subject, body)
+                    self.logger.error(f"[{self.name}] {path} Failed to start production after {max_retries} attempts. Notification email sent.")
+                    return False
+            except Exception as e:
+                self.logger.error(f"[{self.name}] Exception in _check_and_start_production for {path} (URL: {current_building_url}) (Type: {type(e).__name__}): {e}", exc_info=True)
+                return False
 
     def _get_existing_finish_time(self, path, finish_times_list):
         try:
