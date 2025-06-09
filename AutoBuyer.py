@@ -11,6 +11,7 @@ from config import (
     MONEY_REQUEST_TIMEOUT
 )
 from market_utils import get_market_data, get_current_money
+from driver_utils import initialize_driver
 
 # --- Selenium Imports ---
 from selenium.webdriver.remote.webdriver import WebDriver # For type hinting
@@ -19,8 +20,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service as ChromeService
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import WebDriverException
 
 from dotenv import load_dotenv
@@ -222,8 +221,6 @@ class AutoBuyer:
         # self.driver is initialized to None in __init__ and will be (re)created here if needed.
         # Any driver passed via __init__ is no longer accepted.
         try:
-            options = webdriver.ChromeOptions()
-            # Use USER_DATA_DIR_autobuy for AutoBuyer
             user_data_dir_autobuy = os.getenv("USER_DATA_DIR_autobuy")
             if not user_data_dir_autobuy:
                 raise ValueError("USER_DATA_DIR_autobuy environment variable not set or empty in .env file, please check configuration.")
@@ -231,14 +228,6 @@ class AutoBuyer:
                 raise FileNotFoundError(f"The specified user data directory for autobuy does not exist: {user_data_dir_autobuy}")
             
             print(f"AutoBuyer will use profile: {user_data_dir_autobuy}")
-            options.add_argument(f"user-data-dir={user_data_dir_autobuy}")
-            # The --profile-directory argument is often not needed if user-data-dir points to the specific profile folder.
-            # options.add_argument(f"--profile-directory=Default") 
-
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
-            options.add_experimental_option("excludeSwitches", ["enable-logging"])
             while True:
                 purchase_attempted_in_cycle = False
                 api_error_in_cycle = False  # New flag for API errors
@@ -279,11 +268,9 @@ class AutoBuyer:
                         if lowest_price < buy_threshold_price:
                             print(f"***> Condition met ({product_name})! Lowest price ${lowest_price:.3f} < threshold ${buy_threshold_price:.3f}")
                             if self.driver is None:
-                                print("Initializing Selenium WebDriver in AutoBuyer.main_loop...")
+                                print("Initializing Selenium WebDriver in AutoBuyer.main_loop via driver_utils.initialize_driver()...")
                                 try:
-                                    service = ChromeService(ChromeDriverManager().install())
-                                    # Ensure self.driver is assigned the new driver instance
-                                    self.driver = webdriver.Chrome(service=service, options=options)
+                                    self.driver = initialize_driver(user_data_dir=user_data_dir_autobuy, user_data_dir_env_var="USER_DATA_DIR_autobuy")
                                 except Exception as e_wd_init: # Catch specific exception for logging
                                     err_msg = f"WebDriver initialization failed: {type(e_wd_init).__name__} - {e_wd_init}"
                                     print(err_msg)
