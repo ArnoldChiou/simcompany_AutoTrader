@@ -5,6 +5,7 @@ import re
 import traceback
 import logging
 import random
+import json
 from dateutil import parser
 from dotenv import load_dotenv
 
@@ -477,6 +478,62 @@ class PowerPlantProducer(BaseMonitor):
     def __init__(self, target_paths, logger=None, user_data_dir=None):
         super().__init__("PowerPlant", logger=logger, user_data_dir=user_data_dir)
         self.target_paths = target_paths
+        self.finish_times_file_path = os.path.join('record', 'powerplant_finish_times.json')
+        self.plant_finish_times = self._load_finish_times()
+        # Ensure all target_paths have an entry, defaulting to None if not in loaded_times
+        for path in target_paths:
+            if path not in self.plant_finish_times:
+                self.plant_finish_times[path] = None
+
+    def _load_finish_times(self):
+        """Loads finish times from the JSON file."""
+        try:
+            if os.path.exists(self.finish_times_file_path):
+                with open(self.finish_times_file_path, 'r') as f:
+                    data = json.load(f)
+                # Convert ISO strings back to datetime objects
+                loaded_times = {}
+                for path, time_str in data.items():
+                    if time_str:
+                        try:
+                            loaded_times[path] = parser.parse(time_str)
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"[{self.name}] Invalid datetime format for {path} in {self.finish_times_file_path}: {time_str}. Setting to None.")
+                            loaded_times[path] = None
+                    else:
+                        loaded_times[path] = None
+                self.logger.info(f"[{self.name}] Successfully loaded finish times from {self.finish_times_file_path}")
+                return loaded_times
+            else:
+                self.logger.info(f"[{self.name}] Finish times file not found ({self.finish_times_file_path}). Initializing with empty times.")
+                return {path: None for path in self.target_paths}
+        except (json.JSONDecodeError, IOError) as e:
+            self.logger.error(f"[{self.name}] Error loading finish times from {self.finish_times_file_path}: {e}. Initializing with empty times.")
+            return {path: None for path in self.target_paths}
+        except Exception as e:
+            self.logger.error(f"[{self.name}] Unexpected error loading finish times: {e}. Initializing with empty times.", exc_info=True)
+            return {path: None for path in self.target_paths}
+
+    def _save_finish_times(self):
+        """Saves current finish times to the JSON file."""
+        try:
+            # Ensure the directory exists
+            os.makedirs(os.path.dirname(self.finish_times_file_path), exist_ok=True)
+            # Convert datetime objects to ISO strings for JSON serialization
+            data_to_save = {}
+            for path, dt_obj in self.plant_finish_times.items():
+                if dt_obj:
+                    data_to_save[path] = dt_obj.isoformat()
+                else:
+                    data_to_save[path] = None
+            
+            with open(self.finish_times_file_path, 'w') as f:
+                json.dump(data_to_save, f, indent=4)
+            self.logger.info(f"[{self.name}] Successfully saved finish times to {self.finish_times_file_path}")
+        except IOError as e:
+            self.logger.error(f"[{self.name}] Error saving finish times to {self.finish_times_file_path}: {e}")
+        except Exception as e:
+            self.logger.error(f"[{self.name}] Unexpected error saving finish times: {e}", exc_info=True)
 
     def run(self):
         """Starts the continuous production loop."""
@@ -487,23 +544,25 @@ class PowerPlantProducer(BaseMonitor):
                 time.sleep(LONG_RETRY_DELAY * 2)
                 continue
 
-            wait_seconds = self._process_plants()
-            self._quit_driver()
+            # Process plants and get the time to wait for the next due plant
+            wait_seconds = self._process_plants() # This now returns wait time for the *next* event or an error code
+            self._quit_driver() # Quit driver after processing all due plants in this cycle
 
-            if wait_seconds is None:
+            if wait_seconds is None: # Indicates a critical error or user interruption
                 self.logger.warning(f"[{self.name}] Critical error or user interruption in _process_plants. Stopping monitor.")
-                break
+                break # Exit the loop
 
             effective_wait = 0
-            if wait_seconds < 0:
+            if wait_seconds < 0: # Negative value indicates an error and is the delay to apply
                 self.logger.warning(f"[{self.name}] An error occurred in _process_plants. Applying delay: {-wait_seconds:.0f}s.")
                 effective_wait = -wait_seconds
-            elif wait_seconds == 0:
-                self.logger.info(f"[{self.name}] Production likely finished for all plants or no active plants. Checking again after default delay ({DEFAULT_RETRY_DELAY}s).")
+            elif wait_seconds == 0: # No plants are currently producing or scheduled (all are None or in the past and processed)
+                self.logger.info(f"[{self.name}] No future production times set or all plants processed. Checking again after default delay ({DEFAULT_RETRY_DELAY}s).")
                 effective_wait = DEFAULT_RETRY_DELAY
-            else:
-                effective_wait = wait_seconds + PRODUCTION_CHECK_BUFFER # 使用原有的緩衝
-                self.logger.info(f"[{self.name}] Next check for ongoing production in {effective_wait:.0f} seconds (raw wait: {wait_seconds:.0f}s).")
+            else: # Positive value is the time in seconds until the next plant is due
+                # Add a small buffer to ensure we don't check too early
+                effective_wait = wait_seconds + PRODUCTION_CHECK_BUFFER 
+                self.logger.info(f"[{self.name}] Next check for a due plant in {wait_seconds:.0f}s (plus {PRODUCTION_CHECK_BUFFER}s buffer). Effective wait: {effective_wait:.0f}s.")
 
             self.logger.info(f"[{self.name}] Next overall check cycle in {effective_wait:.0f} seconds.")
             try:
@@ -514,106 +573,102 @@ class PowerPlantProducer(BaseMonitor):
             self.logger.info(f"\n[{self.name}] === Starting new production check cycle ===\n")
 
     def _process_plants(self):
-        finish_times_collected = []
         now = datetime.datetime.now()
         error_occurred_in_cycle = False
         started_paths_in_cycle = []
-        
-        opened_tabs_map = {} # {path_str: window_handle_str}
-
-        try:
-            num_targets = len(self.target_paths)
-            if num_targets == 0:
-                self.logger.info(f"[{self.name}] No target paths configured. Skipping processing.")
+        opened_tabs_map = {}
+        due_paths = []
+        # 只處理到期的powerplant
+        for path, finish_dt in self.plant_finish_times.items():
+            if finish_dt is None or finish_dt <= now:
+                due_paths.append(path)
+        if not due_paths:
+            # 沒有任何到期的plant，計算下次最早的完成時間
+            future_times = [dt for dt in self.plant_finish_times.values() if dt is not None and dt > now]
+            if future_times:
+                min_wait = min((dt - now).total_seconds() for dt in future_times)
+                return max(0, min_wait)
+            else:
                 return 0
 
-            self.logger.info(f"[{self.name}] Attempting to open {num_targets} tabs for power plants...")
-            
+        self.logger.info(f"[{self.name}] Due plants to process: {due_paths}")
+        try:
+            num_targets = len(due_paths)
+            if num_targets == 0:
+                self.logger.info(f"[{self.name}] No due plants configured. Skipping processing.")
+                return 0
+            self.logger.info(f"[{self.name}] Attempting to open {num_targets} tabs for due power plants...")
             initial_main_window_handle = None
             try:
                 initial_main_window_handle = self.driver.current_window_handle
             except WebDriverException as e:
                 self.logger.error(f"[{self.name}] Could not get initial window handle: {type(e).__name__} - {e}. Aborting.")
                 return -LONG_RETRY_DELAY
-
-            for idx, target_path in enumerate(self.target_paths):
+            for idx, target_path in enumerate(due_paths):
                 url = self.base_url + target_path
                 self.logger.info(f"[{self.name}] Opening tab {idx + 1}/{num_targets} for: {url}")
-                
                 try:
                     current_handles_before_open = set(self.driver.window_handles)
-                    if idx == 0: 
+                    if idx == 0:
                         if self.driver.current_url.strip('/') != url.strip('/'):
-                             self.driver.get(url)
-                        WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body"))) # 縮短至15s
+                            self.driver.get(url)
+                        WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                         opened_tabs_map[target_path] = self.driver.current_window_handle
                     else:
                         self.driver.execute_script(f"window.open('{url}', '_blank');")
-                        WebDriverWait(self.driver, 10).until( # 縮短至10s
+                        WebDriverWait(self.driver, 10).until(
                             lambda d: len(set(d.window_handles) - current_handles_before_open) == 1
                         )
                         new_window_handle = list(set(self.driver.window_handles) - current_handles_before_open)[0]
                         self.driver.switch_to.window(new_window_handle)
-                        WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body"))) # 縮短至15s
+                        WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
                         opened_tabs_map[target_path] = new_window_handle
-
                     if not self.driver.current_url.strip("/").endswith(target_path.strip("/")):
                         self.logger.warning(f"[{self.name}] Tab for {target_path} opened, but current URL is '{self.driver.current_url}'. Expected to end with '{target_path.strip('/')}'.")
-
                     self.logger.info(f"[{self.name}] Successfully opened and focused tab for {target_path}.")
-                    time.sleep(random.uniform(0.8, 1.5)) # **縮短** 原 (1.8, 3.5)
-
+                    time.sleep(random.uniform(0.8, 1.5))
                 except WebDriverException as e_tab_open:
                     self.logger.error(f"[{self.name}] Error opening/switching to tab for {url} (Type: {type(e_tab_open).__name__}): {e_tab_open}. Skipping this plant.")
                     error_occurred_in_cycle = True
-                    try: 
-                        _ = self.driver.title 
+                    try:
+                        _ = self.driver.title
                     except WebDriverException:
                         self.logger.critical(f"[{self.name}] WebDriver session seems to be dead after failing to open tab for {url}. Aborting cycle.")
                         return -LONG_RETRY_DELAY
                     if idx == 0 and not opened_tabs_map:
-                         self.logger.critical(f"[{self.name}] Failed to process the very first target path {target_path}. WebDriver might be unusable.")
-                         return -LONG_RETRY_DELAY
+                        self.logger.critical(f"[{self.name}] Failed to process the very first target path {target_path}. WebDriver might be unusable.")
+                        return -LONG_RETRY_DELAY
                     continue
-
             self.logger.info(f"[{self.name}] Finished attempting to open tabs. {len(opened_tabs_map)} tabs were mapped.")
-
             if error_occurred_in_cycle or len(opened_tabs_map) != num_targets:
-                 self.logger.warning(f"[{self.name}] Potential issues during tab opening ({len(opened_tabs_map)}/{num_targets} successful). Checking driver health.")
-                 try:
-                     _ = self.driver.title
-                 except WebDriverException as e_dead_driver:
-                     self.logger.critical(f"[{self.name}] WebDriver session is dead BEFORE processing tabs: {e_dead_driver}. Aborting cycle.")
-                     return -LONG_RETRY_DELAY
-            
-            for target_path in self.target_paths:
+                self.logger.warning(f"[{self.name}] Potential issues during tab opening ({len(opened_tabs_map)}/{num_targets} successful). Checking driver health.")
+                try:
+                    _ = self.driver.title
+                except WebDriverException as e_dead_driver:
+                    self.logger.critical(f"[{self.name}] WebDriver session is dead BEFORE processing tabs: {e_dead_driver}. Aborting cycle.")
+                    return -LONG_RETRY_DELAY
+            for target_path in due_paths:
                 if target_path not in opened_tabs_map:
                     self.logger.warning(f"[{self.name}] Skipping processing for {target_path} as it was not successfully opened or mapped.")
                     error_occurred_in_cycle = True
                     continue
-
                 window_handle = opened_tabs_map[target_path]
                 self.logger.info(f"[{self.name}] Processing plant: {target_path} on its tab (Handle: {window_handle})")
-                
                 try:
                     self.driver.switch_to.window(window_handle)
-                    time.sleep(random.uniform(0.1, 0.2)) # **縮短** 原 (0.1, 0.3)
-                    
+                    time.sleep(random.uniform(0.1, 0.2))
                     if not self.driver.current_url.strip("/").endswith(target_path.strip("/")):
                         self.logger.warning(f"[{self.name}] Switched to tab for {target_path}, but URL is '{self.driver.current_url}'. Forcing navigation.")
                         self.driver.get(self.base_url + target_path)
-                        WebDriverWait(self.driver, 15).until(EC.url_contains(target_path.split('/')[-2])) # 縮短至15s
+                        WebDriverWait(self.driver, 15).until(EC.url_contains(target_path.split('/')[-2]))
                     WebDriverWait(self.driver, 20).until(
                         EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
                     )
-                    time.sleep(random.uniform(0.2, 0.4)) # **縮短** 原 (0.5, 1.0)
-
-                    production_started_here = self._check_and_start_production(target_path, finish_times_collected)
+                    production_started_here = self._check_and_start_production(target_path)
                     if production_started_here:
                         started_paths_in_cycle.append(target_path)
-                    elif not self._get_existing_finish_time(target_path, finish_times_collected):
-                        self.logger.warning(f"[{self.name}] For {target_path}: No new production started and no existing finish time found.")
-
+                    else:
+                        self._get_existing_finish_time(target_path)
                 except NoSuchWindowException:
                     self.logger.error(f"[{self.name}] Window for {target_path} (Handle: {window_handle}) not found. It might have closed. Skipping.")
                     error_occurred_in_cycle = True
@@ -637,64 +692,39 @@ class PowerPlantProducer(BaseMonitor):
                 except Exception as e_plant:
                     self.logger.error(f"[{self.name}] Unexpected error processing {target_path} at {self.driver.current_url}: {e_plant}", exc_info=True)
                     error_occurred_in_cycle = True
-                
-                time.sleep(random.uniform(0.5, 1.0)) # **縮短** 原 (0.8, 2.0)
-
-            if started_paths_in_cycle:
-                self.logger.info(f"[{self.name}] Verification phase for {len(started_paths_in_cycle)} plants where production was attempted.")
-                if not self._verify_all_producing(started_paths_in_cycle, opened_tabs_map):
-                    self.logger.warning(f"[{self.name}] Some plants failed production verification after attempts to start them.")
-                    error_occurred_in_cycle = True
-            
+                time.sleep(random.uniform(0.5, 1.0))
             if initial_main_window_handle:
                 try:
                     self.driver.switch_to.window(initial_main_window_handle)
                 except NoSuchWindowException:
                     self.logger.warning(f"[{self.name}] Initial main window handle {initial_main_window_handle} no longer valid.")
                 except WebDriverException as e_switch_main:
-                     self.logger.warning(f"[{self.name}] Error switching back to initial main window: {e_switch_main}")
-
+                    self.logger.warning(f"[{self.name}] Error switching back to initial main window: {e_switch_main}")
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing in _process_plants interrupted by user.")
             return None
         except WebDriverException as e_main_wd:
             self.logger.critical(f"[{self.name}] Critical WebDriver error during main plant processing loop (Type: {type(e_main_wd).__name__}): {e_main_wd}", exc_info=True)
+            self._save_finish_times()
             return -LONG_RETRY_DELAY
         except Exception as e_main:
             self.logger.critical(f"[{self.name}] Unhandled error in _process_plants: {e_main}", exc_info=True)
+            self._save_finish_times()
             return -DEFAULT_RETRY_DELAY
-
-        min_wait_seconds = float('inf')
-        earliest_finish_dt_str = "N/A"
-        found_active_production = False
-
-        if not finish_times_collected and not error_occurred_in_cycle:
-             self.logger.info(f"[{self.name}] No production times collected and no errors during processing. All plants might be idle or processing attempts failed to gather time.")
-             return 0
-
-        for time_str_entry in finish_times_collected:
-            try:
-                actual_time_str = time_str_entry.replace('Finishes at', '').strip()
-                finish_dt = parser.parse(actual_time_str)
-                wait = (finish_dt - now).total_seconds()
-                if wait > 0:
-                    found_active_production = True
-                    if wait < min_wait_seconds:
-                        min_wait_seconds = wait
-                        earliest_finish_dt_str = finish_dt.strftime('%Y-%m-%d %H:%M:%S')
-            except Exception as e_parse_time:
-                self.logger.warning(f"[{self.name}] Could not parse finish time string '{time_str_entry}': {e_parse_time}")
-                error_occurred_in_cycle = True
-                continue
         
-        if found_active_production and min_wait_seconds != float('inf'):
-            self.logger.info(f"[{self.name}] Earliest production finish time: {earliest_finish_dt_str}. Min wait: {min_wait_seconds:.0f} seconds.")
-            return min_wait_seconds
-        else:
-            self.logger.info(f"[{self.name}] No active future production found, or all parsed times were in the past.")
-            return -DEFAULT_RETRY_DELAY if error_occurred_in_cycle else 0
+        self._save_finish_times()
 
-    def _check_and_start_production(self, path, finish_times_list):
+        # 計算下次最早的完成時間
+        now = datetime.datetime.now()
+        future_times = [dt for dt in self.plant_finish_times.values() if dt is not None and dt > now]
+        if future_times:
+            min_wait = min((dt - now).total_seconds() for dt in future_times)
+            return max(0, min_wait)
+        else:
+            return 0
+
+    def _check_and_start_production(self, path):
+        """Attempts to start production and updates self.plant_finish_times."""
         current_building_url = self.base_url + path
         max_retries = 3
         for attempt in range(1, max_retries + 1):
@@ -703,9 +733,12 @@ class PowerPlantProducer(BaseMonitor):
                 if finish_time_elements and finish_time_elements[0].is_displayed():
                     finish_time_str = finish_time_elements[0].text.strip()
                     self.logger.info(f"[{self.name}] {path} is ALREADY PRODUCING. Finish time: {finish_time_str}")
-                    if finish_time_str not in finish_times_list: finish_times_list.append(finish_time_str)
+                    try:
+                        finish_dt = parser.parse(finish_time_str.replace('Finishes at', '').strip())
+                        self.plant_finish_times[path] = finish_dt
+                    except Exception:
+                        self.plant_finish_times[path] = None
                     return False
-
                 self.logger.info(f"[{self.name}] {path} is not producing, attempting to start 24h production... (attempt {attempt}/{max_retries})")
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='24h']"))).click()
                 time.sleep(random.uniform(0.2, 0.5))
@@ -716,7 +749,8 @@ class PowerPlantProducer(BaseMonitor):
                 confirmation_element = WebDriverWait(self.driver, 15).until(
                     EC.any_of(
                         EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]")),
-                        EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
+                        EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                        )
                     )
                 )
                 tag_name = confirmation_element.tag_name
@@ -726,10 +760,15 @@ class PowerPlantProducer(BaseMonitor):
                 new_finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
                 if new_finish_time_elements and new_finish_time_elements[0].is_displayed():
                     new_finish_time_str = new_finish_time_elements[0].text.strip()
+                    try:
+                        finish_dt = parser.parse(new_finish_time_str.replace('Finishes at', '').strip())
+                        self.plant_finish_times[path] = finish_dt
+                    except Exception:
+                        self.plant_finish_times[path] = None
                     self.logger.info(f"[{self.name}] {path} New production finish time: {new_finish_time_str}")
-                    if new_finish_time_str not in finish_times_list: finish_times_list.append(new_finish_time_str)
                 else:
                     self.logger.warning(f"[{self.name}] {path} Production confirmed, but 'Finishes at' text not immediately found/updated. Will rely on next cycle if needed.")
+                    self.plant_finish_times[path] = None
                 return True
             except TimeoutException:
                 self.logger.warning(f"[{self.name}] {path} Timeout during production start/verification. Production might NOT have started. (attempt {attempt}/{max_retries})")
@@ -746,124 +785,39 @@ class PowerPlantProducer(BaseMonitor):
                     body = f"PowerPlant {path} 連續{max_retries}次點擊生產按鈕皆失敗，請手動檢查。\nURL: {current_building_url}"
                     send_email_notify(subject, body)
                     self.logger.error(f"[{self.name}] {path} Failed to start production after {max_retries} attempts. Notification email sent.")
+                    self.plant_finish_times[path] = None
                     return False
             except Exception as e:
                 self.logger.error(f"[{self.name}] Exception in _check_and_start_production for {path} (URL: {current_building_url}) (Type: {type(e).__name__}): {e}", exc_info=True)
+                self.plant_finish_times[path] = None
                 return False
 
-    def _get_existing_finish_time(self, path, finish_times_list):
+    def _get_existing_finish_time(self, path):
+        """Gets existing finish time and updates self.plant_finish_times."""
         try:
-            # WebDriverWait 超時維持7s
             finish_time_elements = WebDriverWait(self.driver, 7).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
-            )
+                EC.presence_of_all_elements_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+            ))
             if finish_time_elements and finish_time_elements[0].is_displayed():
                 finish_time_str = finish_time_elements[0].text.strip()
                 self.logger.info(f"[{self.name}] {path} Found existing completion time: {finish_time_str}")
-                if finish_time_str not in finish_times_list:
-                    finish_times_list.append(finish_time_str)
+                try:
+                    finish_dt = parser.parse(finish_time_str.replace('Finishes at', '').strip())
+                    self.plant_finish_times[path] = finish_dt
+                except Exception:
+                    self.plant_finish_times[path] = None
                 return True
             self.logger.info(f"[{self.name}] {path} 'Finishes at' element list empty or not displayed. Assuming no active production time visible.")
+            self.plant_finish_times[path] = None
             return False
         except TimeoutException:
             self.logger.info(f"[{self.name}] {path} No 'Finishes at' time found (TimeoutException). Plant is likely idle.")
+            self.plant_finish_times[path] = None
             return False
         except Exception as e:
             self.logger.error(f"[{self.name}] Exception in _get_existing_finish_time for {path} (Type: {type(e).__name__}): {e}", exc_info=True)
+            self.plant_finish_times[path] = None
             return False
-
-    def _is_producing(self, path_for_log):
-        try:
-            # WebDriverWait 超時維持較短時間，因為這是快速檢查
-            cancel_buttons = WebDriverWait(self.driver, 3).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]"))
-            )
-            if cancel_buttons and cancel_buttons[0].is_displayed():
-                return True
-            
-            finish_texts = WebDriverWait(self.driver, 2).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]"))
-            )
-            if finish_texts and finish_texts[0].is_displayed():
-                return True
-                
-            return False
-        except TimeoutException: # 預期內的，如果元素不存在
-            return False 
-        except WebDriverException as e_wd:
-             self.logger.debug(f"[{self.name}] WebDriver error checking production status for {path_for_log} (likely page unresponsive): {type(e_wd).__name__}")
-             return False
-        except Exception as e:
-            self.logger.error(f"[{self.name}] Unexpected error in _is_producing for {path_for_log} (Type: {type(e).__name__}): {e}", exc_info=False)
-            return False
-
-    def _verify_all_producing(self, started_paths, opened_tabs_map, retry_limit=2):
-        if not started_paths:
-            self.logger.info(f"[{self.name}] No plants were marked as 'started' in this cycle, skipping verification.")
-            return True
-
-        all_verified_successfully = True
-        paths_needing_retry = list(started_paths) 
-
-        for attempt in range(1, retry_limit + 1):
-            self.logger.info(f"[{self.name}] Verification attempt {attempt}/{retry_limit} for {len(paths_needing_retry)} plant(s).")
-            if not paths_needing_retry: break
-
-            current_round_failed_paths = [] 
-            for path_to_verify in list(paths_needing_retry): 
-                handle_to_verify = opened_tabs_map.get(path_to_verify)
-                if not handle_to_verify:
-                    self.logger.error(f"[{self.name}] No valid window handle found for '{path_to_verify}' in opened_tabs_map during verification. Skipping.")
-                    current_round_failed_paths.append(path_to_verify)
-                    all_verified_successfully = False
-                    continue
-                
-                try:
-                    self.driver.switch_to.window(handle_to_verify)
-                    time.sleep(random.uniform(0.1, 0.3)) # **縮短** 原 (0.2, 0.5)
-
-                    if not self._is_producing(path_to_verify):
-                        self.logger.warning(f"[{self.name}] VERIFICATION FAILED for '{path_to_verify}' (Attempt {attempt}). Not producing. Attempting to restart...")
-                        temp_finish_times = [] 
-                        if self._check_and_start_production(path_to_verify, temp_finish_times): 
-                            self.logger.info(f"[{self.name}] Successfully restarted production for '{path_to_verify}' during verification.")
-                            time.sleep(0.5) # **縮短** 原 1s
-                            if self._is_producing(path_to_verify):
-                                self.logger.info(f"[{self.name}] Confirmed '{path_to_verify}' is now producing after restart.")
-                            else:
-                                self.logger.error(f"[{self.name}] Restarted '{path_to_verify}', but it's STILL NOT producing.")
-                                current_round_failed_paths.append(path_to_verify)
-                                all_verified_successfully = False
-                        else:
-                            self.logger.error(f"[{self.name}] Failed to restart production for '{path_to_verify}' during verification attempt {attempt}.")
-                            current_round_failed_paths.append(path_to_verify)
-                            all_verified_successfully = False
-                    else:
-                        self.logger.info(f"[{self.name}] VERIFICATION SUCCESS for '{path_to_verify}' (Attempt {attempt}). It is producing.")
-                        if path_to_verify in paths_needing_retry: paths_needing_retry.remove(path_to_verify) # 從paths_needing_retry中移除已成功的
-
-                except NoSuchWindowException:
-                    self.logger.error(f"[{self.name}] NoSuchWindowException for '{path_to_verify}' during verification. Tab might have closed. (Handle: {handle_to_verify})")
-                    current_round_failed_paths.append(path_to_verify)
-                    all_verified_successfully = False
-                except WebDriverException as e_wd_verify:
-                    self.logger.error(f"[{self.name}] WebDriver error during verification of '{path_to_verify}' (Type: {type(e_wd_verify).__name__}): {e_wd_verify}", exc_info=False)
-                    current_round_failed_paths.append(path_to_verify)
-                    all_verified_successfully = False
-                except Exception as e_verify:
-                    self.logger.error(f"[{self.name}] Unexpected error during verification of '{path_to_verify}' (Type: {type(e_verify).__name__}): {e_verify}", exc_info=True)
-                    current_round_failed_paths.append(path_to_verify)
-                    all_verified_successfully = False
-            
-            paths_needing_retry = list(set(current_round_failed_paths)) 
-
-        if paths_needing_retry:
-            self.logger.error(f"[{self.name}] After {retry_limit} verification attempts, the following plants are still NOT producing or encountered errors: {paths_needing_retry}")
-            all_verified_successfully = False
-        elif all_verified_successfully : 
-             self.logger.info(f"[{self.name}] All initially started plants successfully verified and are producing.")
-        
-        return all_verified_successfully
 
 # --- Oil Rig Monitor ---
 class OilRigMonitor(BaseMonitor):
