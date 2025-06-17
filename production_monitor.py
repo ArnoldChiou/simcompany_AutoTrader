@@ -579,8 +579,10 @@ class PowerPlantProducer(BaseMonitor):
         opened_tabs_map = {}
         due_paths = []
         # 只處理到期的powerplant
+        # Modified to include plants finishing in the next 60 seconds
+        process_threshold_time = now + datetime.timedelta(seconds=60)
         for path, finish_dt in self.plant_finish_times.items():
-            if finish_dt is None or finish_dt <= now:
+            if finish_dt is None or finish_dt <= process_threshold_time:
                 due_paths.append(path)
         if not due_paths:
             # 沒有任何到期的plant，計算下次最早的完成時間
