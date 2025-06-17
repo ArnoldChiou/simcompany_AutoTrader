@@ -89,6 +89,53 @@ class AutoBuyer:
         self._market_data_cache[cache_key] = (now, data)
         return data
 
+    def _get_current_market_price(self, driver, product_name): # Added product_name for logging
+        """使用 Selenium 取得網頁上第一個訂單的價格 (float)，使用 aria-label 定位並加入等待機制"""
+        first_row_selector = "tr[aria-label*='market order']"
+        try:
+            wait = WebDriverWait(driver, 10) # Wait up to 10 seconds
+            # Target the first row that has an aria-label containing 'market order'
+            first_row = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, first_row_selector)))
+
+            # Get all td elements within this row
+            tds = first_row.find_elements(By.TAG_NAME, "td")
+
+            if len(tds) >= 4: # Price is expected in the 4th td (index 3)
+                # 直接取第四個 td 的文本內容
+                price_text_raw = tds[3].text 
+                
+                price_text = price_text_raw.strip().replace('$', '')
+                if not price_text: # 檢查處理後的價格文本是否為空
+                    print(f"[Warning] [{product_name}] Price text is empty after stripping from 4th td.")
+                    self._log_error_message(f"[{product_name}] Price text empty in 4th td. Row HTML: {first_row.get_attribute('outerHTML')}")
+                    return None
+                try:
+                    return float(price_text)
+                except ValueError:
+                    print(f"[Warning] [{product_name}] Could not convert price text '{price_text}' to float.")
+                    self._log_error_message(f"[{product_name}] ValueError converting price text to float: '{price_text}'. Row HTML: {first_row.get_attribute('outerHTML')}")
+                    return None
+            else:
+                print(f"[Warning] [{product_name}] 訂單列欄位數不足 ({len(tds)} found), 無法取得價格.")
+                row_html = first_row.get_attribute('outerHTML') if first_row else "Not found" # Defensive check for first_row
+                self._log_error_message(f"[{product_name}] 訂單列欄位數不足 ({len(tds)}). Row selector: '{first_row_selector}'. Row HTML: {row_html}")
+                return None
+        except TimeoutException:
+            print(f"[Warning] [{product_name}] 等待市場訂單元素 ('{first_row_selector}') 超時。")
+            self._log_error_message(f"[{product_name}] Timeout waiting for element: {first_row_selector}. Current URL: {driver.current_url}")
+            return None
+        except Exception as e:
+            page_html_snippet = ""
+            try:
+                body_element = driver.find_element(By.TAG_NAME, 'body')
+                page_html_snippet = body_element.get_attribute('outerHTML')[:1500] # Get a snippet
+            except:
+                page_html_snippet = "Could not retrieve page snippet."
+            
+            print(f"[Warning] [{product_name}] 無法取得網頁即時價格: {type(e).__name__} - {e}")
+            self._log_error_message(f"[{product_name}] Error in _get_current_market_price: {type(e).__name__} - {e}. Selector: '{first_row_selector}'. URL: {driver.current_url}. HTML snippet: {page_html_snippet}")
+            return None
+
     # --- Modified trigger_buy_action to accept product details ---
     def trigger_buy_action(self, product_name, product_info, order_id, price, quantity_available):
         if not self.driver:
@@ -124,11 +171,30 @@ class AutoBuyer:
             if self.driver.current_url != market_page_url:
                 print(f"Warning: Not on target market page ({product_name}), navigating to: {market_page_url}")
                 self.driver.get(market_page_url)
-                print("Waiting for quantity input box to be visible and clickable...")
+                # Wait for a known element on the market page to ensure it's loaded before price check
                 WebDriverWait(self.driver, 20).until(
-                    EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[name="quantity"]'))
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'input[name="quantity"]'))
                 )
-                print("Quantity input box found.")
+                print("Market page loaded, quantity input box found.")
+
+            # 新增：下單前再次檢查網頁即時價格
+            print(f"[{product_name}] 觸發購買時的目標價格: ${price:.3f}")
+            current_market_price = self._get_current_market_price(self.driver, product_name) # Pass product_name
+
+            if current_market_price is None:
+                print(f"[警告] [{product_name}] 無法獲取當前網頁即時價格，為安全起見，取消下單。")
+                # Error already logged in _get_current_market_price if it returns None
+                # self._log_error_message(f"{product_name}: 無法獲取當前網頁即時價格，取消下單。觸發價格 ${price:.3f}")
+                return False
+            
+            print(f"[{product_name}] 檢查時的網頁即時價格: ${current_market_price:.3f}")
+
+            if current_market_price > price:
+                print(f"[警告] [{product_name}] 當前網頁價格 (${current_market_price:.3f}) 已高於觸發價格 (${price:.3f})，取消下單。")
+                self._log_error_message(f"{product_name}: 當前網頁價格 (${current_market_price:.3f}) 已高於觸發價格 (${price:.3f})，取消下單。")
+                return False
+            else:
+                print(f"[{product_name}] 價格檢查通過：網頁即時價格 (${current_market_price:.3f}) <= 觸發價格 (${price:.3f})。")
 
             wait = WebDriverWait(self.driver, 15)
             quantity_input = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, 'input[name="quantity"]')))
