@@ -1074,7 +1074,7 @@ class OilRigMonitor(BaseMonitor):
                         )
                         confirm_btn.click()
                         self.logger.info(f"  Confirmation modal 'Rebuild' clicked. ({i+1}/2)")
-                        time.sleep(1)
+                        time.sleep(3)
                     except TimeoutException:
                         self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
                         break
