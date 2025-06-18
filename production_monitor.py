@@ -289,21 +289,7 @@ class ForestNurseryMonitor(BaseMonitor):
     def _try_nurture_or_cutdown(self, target_path):
         """Tries to click Max and Nurture, handles resource errors by cutting down. Also checks for 'Not enough input resources of quality 5 available' or 'Water missing' if Nurture/Max not found. After Cut down, retries Nurture until 'Cancel Nurturing' is found or max retries reached."""
         def try_nurture():
-            try:
-                WebDriverWait(self.driver, 5).until(
-                    EC.element_to_be_clickable((By.XPATH, "//label[contains(., 'Max') and @type='button']"))
-                ).click()
-                time.sleep(0.5)
-                nurture_btn = WebDriverWait(self.driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]")
-                ))
-                if nurture_btn.is_enabled():
-                    nurture_btn.click()
-                    time.sleep(1)
-                    return True
-            except Exception as e:
-                self.logger.info(f"{target_path} Nurture attempt failed: {e}")
-            return False
+            return self._click_max_and_nurture()
 
         # 先檢查是否正在生產中，若是則直接 return "NONE"
         try:
@@ -395,18 +381,27 @@ class ForestNurseryMonitor(BaseMonitor):
         self.logger.error(f"{target_path} Failed to start production after Cut down and {max_retries} retries.")
         return "FAILED"
 
-    def _try_nurture_button_only(self):
-        """Tries to click Nurture button only (assumes Max already set)."""
+    def _click_max_and_nurture(self):
+        """Clicks the Max button and then the Nurture button. Returns True if successful, False otherwise."""
         try:
+            WebDriverWait(self.driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//label[contains(., 'Max') and @type='button']"))
+            ).click()
+            time.sleep(0.5)
             nurture_btn = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]")
-            ))
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Nurture') and contains(@class, 'btn-primary')]"))
+            )
             if nurture_btn.is_enabled():
                 nurture_btn.click()
+                time.sleep(1)
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            self.logger.info(f"Max+Nurture click failed: {e}")
         return False
+
+    def _try_nurture_button_only(self):
+        """Tries to click Max and Nurture button (for retry)."""
+        return self._click_max_and_nurture()
 
     def _get_production_time(self, target_path, production_finish_times):
         """Finds and records the production finish time."""
