@@ -1066,10 +1066,10 @@ class OilRigMonitor(BaseMonitor):
                     rebuild_btn.click()
                     self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
                     try:
-                        modal = WebDriverWait(self.driver, 10).until(
+                        modal = WebDriverWait(self.driver, 20).until(
                             EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
                         )
-                        confirm_btn = WebDriverWait(self.driver, 10).until(
+                        confirm_btn = WebDriverWait(self.driver, 20).until(
                             EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
                         )
                         confirm_btn.click()
@@ -1085,16 +1085,16 @@ class OilRigMonitor(BaseMonitor):
                 if methane_abundance is not None and methane_abundance > 80:
                     self.logger.info(f"  Crude oil <= 80, Methane > 80, clicking rebuild twice.")
                     for i in range(2):
-                        rebuild_btn = WebDriverWait(self.driver, 10).until(
+                        rebuild_btn = WebDriverWait(self.driver, 20).until(
                             EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                         )
                         rebuild_btn.click()
                         self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
                         try:
-                            modal = WebDriverWait(self.driver, 3).until(
+                            modal = WebDriverWait(self.driver, 10).until(
                                 EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
                             )
-                            confirm_btn = WebDriverWait(self.driver, 5).until(
+                            confirm_btn = WebDriverWait(self.driver, 10).until(
                                 EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
                             )
                             confirm_btn.click()
