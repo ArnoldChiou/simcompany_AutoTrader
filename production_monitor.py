@@ -772,7 +772,7 @@ class PowerPlantProducer(BaseMonitor):
                 if attempt < max_retries:
                     try:
                         self.driver.get(current_building_url)
-                        time.sleep(random.uniform(0.3, 0.7))
+                        time.sleep(2)
                     except Exception:
                         pass
                     continue
