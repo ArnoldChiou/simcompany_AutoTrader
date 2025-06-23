@@ -878,7 +878,7 @@ class OilRigMonitor(BaseMonitor):
                     WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
                     try:
-                        WebDriverWait(self.driver, 10).until(
+                        WebDriverWait(self.driver, 30).until(
                             EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
                         )
                         finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
@@ -1060,7 +1060,7 @@ class OilRigMonitor(BaseMonitor):
             if crude_abundance is not None and 80 < crude_abundance <= 95:
                 self.logger.info(f"  Crude oil abundance between 80 and 95, clicking rebuild twice.")
                 for i in range(2):
-                    rebuild_btn = WebDriverWait(self.driver, 10).until(
+                    rebuild_btn = WebDriverWait(self.driver, 20).until(
                         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                     )
                     rebuild_btn.click()
