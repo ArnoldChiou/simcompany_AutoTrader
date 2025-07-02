@@ -878,7 +878,7 @@ class OilRigMonitor(BaseMonitor):
                     WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
 
                     try:
-                        WebDriverWait(self.driver, 30).until(
+                        WebDriverWait(self.driver, 10).until(
                             EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
                         )
                         finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
@@ -1060,50 +1060,50 @@ class OilRigMonitor(BaseMonitor):
             if crude_abundance is not None and 80 < crude_abundance <= 95:
                 self.logger.info(f"  Crude oil abundance between 80 and 95, clicking rebuild twice.")
                 for i in range(2):
-                    rebuild_btn = WebDriverWait(self.driver, 20).until(
-                        EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
-                    )
-                    rebuild_btn.click()
-                    self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
                     try:
-                        modal = WebDriverWait(self.driver, 20).until(
-                            EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                        rebuild_btn = WebDriverWait(self.driver, 20).until(
+                            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                         )
-                        confirm_btn = WebDriverWait(self.driver, 20).until(
-                            EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
+                        rebuild_btn.click()
+                        self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
+
+                        modal_confirm_btn = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
                         )
-                        confirm_btn.click()
+                        modal_confirm_btn.click()
                         self.logger.info(f"  Confirmation modal 'Rebuild' clicked. ({i+1}/2)")
-                        time.sleep(3)
+                        
+                        # Wait a moment for the page to update after confirmation
+                        time.sleep(5)
+
                     except TimeoutException:
-                        self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
-                        break
-                time.sleep(2)
+                        self.logger.warning(f"  Could not find 'Rebuild' button on attempt {i+1}. The rig is likely under construction now. Breaking rebuild loop.")
+                        break  # Exit the loop if the button is no longer available
                 return True
 
             if crude_abundance is not None and crude_abundance <= 80:
                 if methane_abundance is not None and methane_abundance > 80:
                     self.logger.info(f"  Crude oil <= 80, Methane > 80, clicking rebuild twice.")
                     for i in range(2):
-                        rebuild_btn = WebDriverWait(self.driver, 20).until(
-                            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
-                        )
-                        rebuild_btn.click()
-                        self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
                         try:
-                            modal = WebDriverWait(self.driver, 10).until(
-                                EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal-body')]"))
+                            rebuild_btn = WebDriverWait(self.driver, 20).until(
+                                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                             )
-                            confirm_btn = WebDriverWait(self.driver, 10).until(
-                                EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
+                            rebuild_btn.click()
+                            self.logger.info(f"  Rebuild clicked. ({i+1}/2)")
+
+                            modal_confirm_btn = WebDriverWait(self.driver, 10).until(
+                                EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
                             )
-                            confirm_btn.click()
+                            modal_confirm_btn.click()
                             self.logger.info(f"  Confirmation modal 'Rebuild' clicked. ({i+1}/2)")
-                            time.sleep(1)
+                            
+                            # Wait a moment for the page to update
+                            time.sleep(5)
+
                         except TimeoutException:
-                            self.logger.warning("  Confirmation modal did not appear or Rebuild button not found.")
-                            break
-                    time.sleep(2)
+                            self.logger.warning(f"  Could not find 'Rebuild' button on attempt {i+1}. The rig is likely under construction. Breaking rebuild loop.")
+                            break # Exit the loop
                     return True
                 else:
                     self.logger.info(f"  Crude oil <= 80, Methane <= 80 or not found, clicking rebuild once.")
@@ -1111,8 +1111,17 @@ class OilRigMonitor(BaseMonitor):
                         EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Rebuild') and contains(@class, 'btn-danger')]"))
                     )
                     rebuild_btn.click()
-                    time.sleep(2)
                     self.logger.info(f"  Rebuild clicked.")
+                    # Also handle the confirmation modal for the single-click case
+                    try:
+                        modal_confirm_btn = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'modal-content')]//button[contains(@class, 'btn-primary') and contains(., 'Rebuild')]"))
+                        )
+                        modal_confirm_btn.click()
+                        self.logger.info(f"  Confirmation modal 'Rebuild' clicked.")
+                    except TimeoutException:
+                        self.logger.warning("  Confirmation modal did not appear or Rebuild button not found in modal.")
+                    
                     return True
 
             self.logger.info(f"  No rebuild action taken.")
