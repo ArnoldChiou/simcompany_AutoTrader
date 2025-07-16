@@ -90,7 +90,7 @@ COOKIES = {
 if not COOKIES.get('sessionid'):
     print("Error: Please create a .env file and enter a valid SESSIONID. ex: SESSIONID=your_session_id")
     print("If you don't know how to get the Session ID, please refer to README.md")
-BUY_THRESHOLD_PERCENTAGE = 0.96
+BUY_THRESHOLD_PERCENTAGE = 0.94
 DEFAULT_CHECK_INTERVAL_SECONDS = 300
 PURCHASE_WAIT_MULTIPLIER = 1.5
 
