@@ -30,12 +30,12 @@ PRODUCT_CONFIGS = [
         "quality": 0,
         "max_buy_quantity": 100000000
     },
-    {
-        "name": "PlantResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
-        "quality": 0,
-        "max_buy_quantity": 500
-    },
+    #{
+    #    "name": "PlantResearch",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 500
+    #},
     {
         "name": "MiningResearch",
         "api_url": "https://www.simcompanies.com/api/v3/market/0/31/",
@@ -54,6 +54,12 @@ PRODUCT_CONFIGS = [
         "quality": 0,
         "max_buy_quantity": 500
     },
+    {
+        "name": "Electronicsresearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    }
 
     # Example of adding a new product:
     # {
