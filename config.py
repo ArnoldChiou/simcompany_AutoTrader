@@ -49,17 +49,24 @@ PRODUCT_CONFIGS = [
         "max_buy_quantity": 500
     },
     {
-        "name":"ChemistryResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/34/",
+        "name":"AutomotiveResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/58/",
         "quality": 0,
         "max_buy_quantity": 500
     },
+
     {
-        "name": "Electronicsresearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
+        "name":"BreedingResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/33/",
         "quality": 0,
         "max_buy_quantity": 500
     }
+    #{
+    #    "name": "Electronicsresearch",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 500
+    #}
 
     # Example of adding a new product:
     # {
