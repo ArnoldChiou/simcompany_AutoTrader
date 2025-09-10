@@ -30,12 +30,6 @@ PRODUCT_CONFIGS = [
         "quality": 0,
         "max_buy_quantity": 100000000
     },
-    #{
-    #    "name": "PlantResearch",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 500
-    #},
     {
         "name": "MiningResearch",
         "api_url": "https://www.simcompanies.com/api/v3/market/0/31/",
@@ -49,21 +43,42 @@ PRODUCT_CONFIGS = [
         "max_buy_quantity": 500
     },
     {
-        "name":"AutomotiveResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/58/",
+        "name":"MaterialsResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/113/",
         "quality": 0,
-        "max_buy_quantity": 500
-    },
-
-    {
-        "name":"BreedingResearch",
-        "api_url": "https://www.simcompanies.com/api/v3/market/0/33/",
-        "quality": 0,
-        "max_buy_quantity": 500
+        "max_buy_quantity": 1000
     }
+    #{
+    #    "name":"AerospaceResearch",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/100/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 1000
+    #},
+
+    #{
+    #    "name":"Recipes",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/145/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 1000
+    #}
+
+    #{
+    #    "name":"BreedingResearch",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/33/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 500
+    #}
+
     #{
     #    "name": "Electronicsresearch",
     #    "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 500
+    #}
+
+    #{
+    #    "name": "PlantResearch",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
     #    "quality": 0,
     #    "max_buy_quantity": 500
     #}
