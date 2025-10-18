@@ -70,7 +70,7 @@ def run_power_plant_producer(logger):
     """Starts the Power Plant producer."""
     pp_paths = [
         "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
-        "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
+        "/b/46938475/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
         "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
     ] # Or load from config
     user_data_dir = os.getenv("USER_DATA_DIR_powerplant")
