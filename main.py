@@ -8,7 +8,8 @@ from AutoBuyer import AutoBuyer
 from production_monitor import (
     ForestNurseryMonitor,
     PowerPlantProducer,
-    OilRigMonitor
+    OilRigMonitor,
+    BatteryProducer
 )
 from config import (
     TARGET_PRODUCTS, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
@@ -70,7 +71,7 @@ def run_power_plant_producer(logger):
     """Starts the Power Plant producer."""
     pp_paths = [
         "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
-        "/b/46938475/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
+        "/b/39825725/", "/b/39825679/", "/b/39693844/",
         "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
     ] # Or load from config
     user_data_dir = os.getenv("USER_DATA_DIR_powerplant")
@@ -83,6 +84,15 @@ def run_oil_rig_monitor(logger):
     user_data_dir = os.getenv("USER_DATA_DIR_oiirig")
     monitor = OilRigMonitor(logger=logger, user_data_dir=user_data_dir)
     monitor.run()
+
+def run_battery_producer(logger):
+    """Starts the Battery producer."""
+    battery_path = "/b/46938475/" # 這是你的目標 URL
+    # 你可能需要為這個 profile 在 .env 中設定一個新的 USER_DATA_DIR
+    # 例如 USER_DATA_DIR_battery
+    user_data_dir = os.getenv("USER_DATA_DIR_battery") 
+    producer = BatteryProducer(battery_path, logger=logger, user_data_dir=user_data_dir)
+    producer.run()
 
 def run_init_all_profiles():
     import subprocess
@@ -105,6 +115,7 @@ if __name__ == "__main__":
                     ("Monitor Forest Nursery", "3"),
                     ("Produce Power Plant", "4"),
                     ("Monitor All Oil Rigs", "5"),
+                    ("Produce Batteries", "6"),
                     ("Init all Chrome profiles", "init_profiles"),
                     ("Exit", "exit"),
                 ],
@@ -131,6 +142,9 @@ if __name__ == "__main__":
         elif mode == "5":
             logger = setup_logger("production_monitor.oilrig", "monitor_oilrig.log")
             run_oil_rig_monitor(logger)
+        elif mode == "6":
+            logger = setup_logger("production_monitor.battery", "monitor_battery.log")
+            run_battery_producer(logger)
         elif mode == "init_profiles":
             run_init_all_profiles()
         elif mode == "exit":

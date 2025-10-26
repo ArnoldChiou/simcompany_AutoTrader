@@ -1152,6 +1152,226 @@ class OilRigMonitor(BaseMonitor):
         except Exception as e:
             print(f"[{self.name}] Failed to save screenshot: {e}")
 
+# --- Electronics Factory (Batteries) Producer ---
+class BatteryProducer(BaseMonitor):
+    """Manages Electronics Factory (Batteries) production cycle."""
+    def __init__(self, target_path, logger=None, user_data_dir=None):
+        # Note: target_path is a single string, not a list
+        super().__init__("BatteryProducer", logger=logger, user_data_dir=user_data_dir)
+        self.target_path = target_path # Store the single path
+        self.finish_time_file_path = os.path.join('record', 'battery_finish_time.json')
+        self.finish_time = self._load_finish_time() # Only need one time
+
+    def _load_finish_time(self):
+        """Loads the single finish time from the JSON file."""
+        try:
+            if os.path.exists(self.finish_time_file_path):
+                with open(self.finish_time_file_path, 'r') as f:
+                    data = json.load(f)
+                time_str = data.get(self.target_path)
+                if time_str:
+                    try:
+                        dt = parser.parse(time_str)
+                        self.logger.info(f"[{self.name}] Successfully loaded finish time: {dt}")
+                        return dt
+                    except (ValueError, TypeError):
+                        self.logger.warning(f"[{self.name}] Invalid datetime format: {time_str}. Setting to None.")
+                        return None
+            self.logger.info(f"[{self.name}] Finish time file not found. Initializing to None.")
+            return None
+        except Exception as e:
+            self.logger.error(f"[{self.name}] Error loading finish time: {e}. Initializing to None.")
+            return None
+
+    def _save_finish_time(self):
+        """Saves the single finish time to the JSON file."""
+        try:
+            os.makedirs(os.path.dirname(self.finish_time_file_path), exist_ok=True)
+            data_to_save = {}
+            if self.finish_time:
+                data_to_save[self.target_path] = self.finish_time.isoformat()
+            else:
+                data_to_save[self.target_path] = None
+            
+            with open(self.finish_time_file_path, 'w') as f:
+                json.dump(data_to_save, f, indent=4)
+            self.logger.info(f"[{self.name}] Successfully saved finish time.")
+        except Exception as e:
+            self.logger.error(f"[{self.name}] Error saving finish time: {e}")
+
+    def run(self):
+        """Starts the continuous production loop."""
+        self.logger.info(f"[{self.name}] Starting production loop for {self.target_path}.")
+        while True:
+            now = datetime.datetime.now()
+            wait_seconds = 0
+            
+            # Check if we need to wait
+            if self.finish_time and self.finish_time > now:
+                wait_seconds = (self.finish_time - now).total_seconds()
+            
+            if wait_seconds > 0:
+                # Wait until the finish time (plus buffer)
+                effective_wait = wait_seconds + PRODUCTION_CHECK_BUFFER
+                self.logger.info(f"[{self.name}] Production active. Next check in {wait_seconds:.0f}s (plus {PRODUCTION_CHECK_BUFFER}s buffer). Effective wait: {effective_wait:.0f}s.")
+            else:
+                # Time to check/start production
+                self.logger.info(f"[{self.name}] Production finished or not started. Checking now.")
+                if not self._initialize_driver():
+                    self.logger.error(f"[{self.name}] Failed to initialize WebDriver. Retrying after long delay.")
+                    effective_wait = LONG_RETRY_DELAY * 2
+                else:
+                    try:
+                        self._process_building() # This will update self.finish_time
+                    except Exception as e:
+                        self.logger.critical(f"[{self.name}] Unhandled error in _process_building: {e}", exc_info=True)
+                    finally:
+                        self._quit_driver()
+
+                    # Calculate next wait based on what _process_building found
+                    now_after_check = datetime.datetime.now()
+                    if self.finish_time and self.finish_time > now_after_check:
+                        wait_seconds = (self.finish_time - now_after_check).total_seconds()
+                        effective_wait = wait_seconds + PRODUCTION_CHECK_BUFFER
+                        self.logger.info(f"[{self.name}] Production started/found. Next check in {wait_seconds:.0f}s (plus {PRODUCTION_CHECK_BUFFER}s buffer).")
+                    else:
+                        # Failed to start or find time
+                        self.logger.warning(f"[{self.name}] No new finish time set. Retrying after default delay.")
+                        effective_wait = DEFAULT_RETRY_DELAY
+            
+            try:
+                time.sleep(effective_wait)
+            except KeyboardInterrupt:
+                self.logger.info(f"[{self.name}] Production loop interrupted by user.")
+                break
+            self.logger.info(f"\n[{self.name}] === Starting new production check cycle ===\n")
+
+    def _process_building(self):
+        """Processes the single electronics factory building."""
+        building_url = self.base_url + self.target_path
+        self.logger.info(f"[{self.name}] Checking: {building_url}")
+        try:
+            self.driver.get(building_url)
+            # Wait for a known element to ensure page load (Construction header OR Batteries header)
+            WebDriverWait(self.driver, 20).until(
+                EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction'] | //h3[contains(., 'Batteries')]"))
+            )
+            
+            # Check if building is under construction first
+            try:
+                WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction']"))
+                )
+                # If construction found, find its finish time
+                finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                finish_time_str = finish_time_p.text.strip().replace('Finishes at', '').strip()
+                self.logger.info(f"[{self.name}] Building is under construction. Finishes at: {finish_time_str}")
+                self.finish_time = parser.parse(finish_time_str)
+                self._save_finish_time()
+                return # Exit processing, wait for construction
+            except TimeoutException:
+                self.logger.info(f"[{self.name}] Building not under construction. Checking production.")
+            
+            # If not construction, check and start production
+            self._check_and_start_battery_production()
+
+        except (WebDriverException, TimeoutException) as e:
+            self.logger.error(f"[{self.name}] Error processing {building_url}: {e}", exc_info=True)
+            self.finish_time = None # Clear time on error
+        finally:
+            self._save_finish_time() # Save whatever state we ended up in
+
+
+    def _check_and_start_battery_production(self):
+        """Attempts to start max production for Batteries specifically."""
+        
+        # XPath to find the section for the *producible* Batteries item
+        # We find the img alt='Batteries', go up to the common ancestor 'css-1ruhbe', which contains the button
+        battery_section_xpath = "//img[@alt='Batteries']/ancestor::div[contains(@class, 'css-1ruhbe')]"
+        battery_max_button_xpath = f"{battery_section_xpath}//button[normalize-space(.)='Max']"
+        battery_produce_button_xpath = f"{battery_section_xpath}//button[normalize-space(.)='Produce']"
+        
+        # XPath to find the "Finishes at" time for the *currently producing* Batteries
+        # This targets the *first* Batteries item shown in your HTML
+        battery_finish_time_xpath = f"//h3[contains(., 'Batteries')]/ancestor::div[contains(@class, 'row')]//p[starts-with(normalize-space(text()), 'Finishes at')]"
+        # XPath to find the "Cancel Production" button for the *currently producing* Batteries
+        battery_cancel_button_xpath = f"//h3[contains(., 'Batteries')]/ancestor::div[contains(@class, 'row')]//button[contains(., 'Cancel Production')]"
+
+        max_retries = 3
+        for attempt in range(1, max_retries + 1):
+            try:
+                # Check if "Batteries" is *already* producing
+                try:
+                    # Check for "Finishes at" time first
+                    finish_time_elements = self.driver.find_elements(By.XPATH, battery_finish_time_xpath)
+                    if finish_time_elements and finish_time_elements[0].is_displayed():
+                        finish_time_str = finish_time_elements[0].text.strip()
+                        self.logger.info(f"[{self.name}] Batteries are ALREADY PRODUCING. Finish time: {finish_time_str}")
+                        self.finish_time = parser.parse(finish_time_str.replace('Finishes at', '').strip())
+                        return False # Not started this run
+                    
+                    # Fallback check for "Cancel Production" button
+                    cancel_button = self.driver.find_element(By.XPATH, battery_cancel_button_xpath)
+                    if cancel_button.is_displayed():
+                        self.logger.info(f"[{self.name}] Batteries are ALREADY PRODUCING (Cancel button found). Waiting for time to appear.")
+                        # Can't get finish time, so set to check again soon
+                        self.finish_time = datetime.datetime.now() + datetime.timedelta(seconds=DEFAULT_RETRY_DELAY * 2)
+                        return False # Not started this run
+
+                except NoSuchElementException:
+                    self.logger.info(f"[{self.name}] Batteries are not producing (no finish time or cancel button found).")
+                    # Proceed to try and start it
+
+                self.logger.info(f"[{self.name}] Attempting to start max production for Batteries... (attempt {attempt}/{max_retries})")
+                
+                # Find the "max" button *specific to the producible Batteries*
+                button_max = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.XPATH, battery_max_button_xpath))
+                )
+                button_max.click()
+                self.logger.info(f"[{self.name}] 'max' button clicked for Batteries.")
+                time.sleep(random.uniform(0.2, 0.5))
+                WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, battery_produce_button_xpath))).click()
+                self.logger.info(f"[{self.name}] 'produce' button clicked for Batteries.")
+                
+                # Based on your HTML, there is no "Produce" button, so we assume "max" starts it.
+
+                self.logger.info(f"[{self.name}] Production command sent. Verifying production start... (attempt {attempt}/{max_retries})")
+                time.sleep(random.uniform(1.0, 1.5)) # Give it a moment
+                self.driver.get(self.base_url + self.target_path) # Refresh to confirm
+
+                # Wait for confirmation (i.e., for the "Finishes at" text to appear)
+                confirmation_element = WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.XPATH, battery_finish_time_xpath))
+                )
+                
+                new_finish_time_str = confirmation_element.text.strip()
+                self.logger.info(f"[{self.name}] Production successfully STARTED. New finish time: {new_finish_time_str}")
+                self.finish_time = parser.parse(new_finish_time_str.replace('Finishes at', '').strip())
+                return True # Started this run
+
+            except TimeoutException:
+                self.logger.warning(f"[{self.name}] Timeout during production start/verification. (attempt {attempt}/{max_retries})")
+                if attempt < max_retries:
+                    try:
+                        self.driver.get(self.base_url + self.target_path)
+                        time.sleep(2)
+                    except Exception:
+                        pass
+                    continue
+                else:
+                    send_email_notify(
+                        subject=f"[SimCompany BatteryProducer] 連續{max_retries}次啟動生產失敗通知 ({self.target_path})",
+                        body=f"BatteryProducer {self.target_path} 連續{max_retries}次點擊 'Batteries max' 按鈕皆失敗，請手動檢查。\nURL: {self.base_url + self.target_path}"
+                    )
+                    self.logger.error(f"[{self.name}] Failed to start production after {max_retries} attempts. Notification email sent.")
+                    self.finish_time = None
+                    return False
+            except Exception as e:
+                self.logger.error(f"[{self.name}] Exception in _check_and_start_battery_production for {self.target_path} (Type: {type(e).__name__}): {e}", exc_info=True)
+                self.finish_time = None
+                return False
+
 # --- Main Execution ---
 def main():
     """Main function to select and run monitoring tasks."""
