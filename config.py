@@ -47,6 +47,12 @@ PRODUCT_CONFIGS = [
         "api_url": "https://www.simcompanies.com/api/v3/market/0/113/",
         "quality": 0,
         "max_buy_quantity": 1000
+    },
+    {
+       "name":"Chemicals",
+       "api_url": "https://www.simcompanies.com/api/v3/market/0/17/",
+       "quality": 0,
+       "max_buy_quantity": 10000
     }
     #{
     #    "name":"AerospaceResearch",
