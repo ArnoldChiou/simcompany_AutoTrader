@@ -954,25 +954,56 @@ class OilRigMonitor(BaseMonitor):
         max_attempts = 3
         for attempt in range(max_attempts):
             try:
-                a_tags = WebDriverWait(self.driver, 10).until(
-                    EC.presence_of_all_elements_located((By.TAG_NAME, "a"))
+                # 等待直到出現含有 /b/ 的連結 (確保地圖載入)
+                WebDriverWait(self.driver, 20).until(
+                    EC.presence_of_element_located((By.XPATH, "//a[contains(@href, '/b/')]"))
                 )
+                
+                a_tags = self.driver.find_elements(By.TAG_NAME, "a")
                 links = []
                 for a in a_tags:
                     href = a.get_attribute('href')
                     if href and "/b/" in href:
                         is_oil_rig = False
-                        try:
-                            imgs = a.find_elements(By.TAG_NAME, "img")
-                            if any('Oil rig' in img.get_attribute('alt') for img in imgs if img.get_attribute('alt')):
-                                is_oil_rig = True
-                            if not is_oil_rig:
+                        
+                        # 1. 檢查圖片 Alt (一般狀態)
+                        if not is_oil_rig:
+                            try:
+                                imgs = a.find_elements(By.TAG_NAME, "img")
+                                for img in imgs:
+                                    alt = img.get_attribute('alt')
+                                    if alt and 'oil rig' in alt.lower():
+                                        is_oil_rig = True
+                                        break
+                            except Exception: pass
+
+                        # 2. 檢查 Span 文字 (一般狀態)
+                        if not is_oil_rig:
+                            try:
                                 spans = a.find_elements(By.TAG_NAME, "span")
-                                if any('Oil rig' in span.text for span in spans):
-                                     is_oil_rig = True
-                        except StaleElementReferenceException:
-                            self.logger.warning(f"[{self.name}] Stale element while checking tag {href}. Retrying...")
-                            raise
+                                for span in spans:
+                                    text = span.text
+                                    if text and 'oil rig' in text.lower():
+                                        is_oil_rig = True
+                                        break
+                            except Exception: pass
+
+                        # 3. [新增] 檢查 Aria-Label (升級/建造/生產狀態)
+                        if not is_oil_rig:
+                            try:
+                                # 檢查連結本身或其子元素是否有 aria-label 包含 "oil rig"
+                                elements_with_label = a.find_elements(By.XPATH, ".//*[@aria-label]")
+                                for el in elements_with_label:
+                                    label = el.get_attribute('aria-label')
+                                    if label and 'oil rig' in label.lower():
+                                        is_oil_rig = True
+                                        break
+                                # 順便檢查 a 標籤本身
+                                if not is_oil_rig:
+                                    a_label = a.get_attribute('aria-label')
+                                    if a_label and 'oil rig' in a_label.lower():
+                                        is_oil_rig = True
+                            except Exception: pass
                         
                         if is_oil_rig and href not in links:
                             links.append(href)
@@ -982,17 +1013,14 @@ class OilRigMonitor(BaseMonitor):
                     return links
                 else:
                     self.logger.warning(f"[{self.name}] No Oil Rig links found on attempt {attempt + 1}.")
+                    time.sleep(2)
                     if attempt == max_attempts - 1:
                         self._save_screenshot("no_oil_rigs_found")
-                        send_email_notify(
-                           subject="SimCompany Oil Rig Monitoring Error - No Buildings Found",
-                           body=f"No Oil Rig buildings found on the landscape page ({self.landscape_url})."
-                        )
 
                 self.driver.refresh()
 
-            except StaleElementReferenceException:
-                self.logger.warning(f"[{self.name}] StaleElementReferenceException during link collection (Attempt {attempt + 1}). Refreshing...")
+            except TimeoutException:
+                self.logger.warning(f"[{self.name}] Timeout waiting for building links (/b/) to appear on attempt {attempt + 1}.")
                 self.driver.refresh()
             except Exception as e:
                 self.logger.error(f"[{self.name}] Error getting Oil Rig links (Attempt {attempt + 1}): {e}", exc_info=True)
