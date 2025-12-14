@@ -53,7 +53,33 @@ PRODUCT_CONFIGS = [
        "api_url": "https://www.simcompanies.com/api/v3/market/0/17/",
        "quality": 0,
        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Electronicsresearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    },
+    {
+         "name": "Wood",
+         "api_url": "https://www.simcompanies.com/api/v3/market/0/106/",
+         "quality": 0,
+         "max_buy_quantity": 50000
+    },
+    {
+         "name": "Silicon",
+         "api_url": "https://www.simcompanies.com/api/v3/market/0/16/",
+         "quality": 0,
+         "max_buy_quantity": 50000
     }
+
+    #{
+    #    "name": "PlantResearch",
+    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
+    #    "quality": 0,
+    #    "max_buy_quantity": 500
+    #}
+
     #{
     #    "name":"AerospaceResearch",
     #    "api_url": "https://www.simcompanies.com/api/v3/market/0/100/",
@@ -74,28 +100,6 @@ PRODUCT_CONFIGS = [
     #    "quality": 0,
     #    "max_buy_quantity": 500
     #}
-
-    #{
-    #    "name": "Electronicsresearch",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/32/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 500
-    #}
-
-    #{
-    #    "name": "PlantResearch",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 500
-    #}
-
-    # Example of adding a new product:
-    # {
-    #     "name": "Water",
-    #     "api_url": "https://www.simcompanies.com/api/v3/market/0/2/",
-    #     "quality": 1,
-    #     "max_buy_quantity": 5000
-    # },
 ]
 
 # --- Dynamically Generated Dictionaries (for compatibility) ---
