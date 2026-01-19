@@ -87,11 +87,14 @@ def run_oil_rig_monitor(logger):
 
 def run_battery_producer(logger):
     """Starts the Battery producer."""
-    battery_path = "/b/46938475/" # 這是你的目標 URL
+    battery_paths = [
+        "/b/46938475/", 
+        "/b/48600808/" 
+    ]
     # 你可能需要為這個 profile 在 .env 中設定一個新的 USER_DATA_DIR
     # 例如 USER_DATA_DIR_battery
     user_data_dir = os.getenv("USER_DATA_DIR_battery") 
-    producer = BatteryProducer(battery_path, logger=logger, user_data_dir=user_data_dir)
+    producer = BatteryProducer(battery_paths, logger=logger, user_data_dir=user_data_dir)
     producer.run()
 
 def run_init_all_profiles():
