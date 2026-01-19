@@ -1184,7 +1184,6 @@ class OilRigMonitor(BaseMonitor):
 class BatteryProducer(BaseMonitor):
     """Manages Electronics Factory (Batteries) production cycle."""
     def __init__(self, target_paths, logger=None, user_data_dir=None):
-        # 修改為支援多路徑 (target_paths 應為列表)
         super().__init__("BatteryProducer", logger=logger, user_data_dir=user_data_dir)
         self.target_paths = target_paths
         self.finish_times_file_path = os.path.join('record', 'battery_finish_times.json')
@@ -1240,13 +1239,23 @@ class BatteryProducer(BaseMonitor):
                 time.sleep(LONG_RETRY_DELAY * 2)
                 continue
 
+            # 修改邏輯：處理到期的工廠，並返回「距離下一個完成時間」的秒數
             wait_seconds = self._process_all_battery_factories()
             self._quit_driver()
 
             if wait_seconds is None:
                 break
 
-            effective_wait = max(DEFAULT_RETRY_DELAY, wait_seconds + PRODUCTION_CHECK_BUFFER)
+            # 仿照 PowerPlant 邏輯：根據 wait_seconds 決定下次檢查時間
+            effective_wait = 0
+            if wait_seconds < 0: # 錯誤發生
+                effective_wait = LONG_RETRY_DELAY
+            elif wait_seconds == 0: # 沒事可做或全部閒置
+                effective_wait = DEFAULT_RETRY_DELAY
+            else:
+                # 加上 Buffer，確保到期時再檢查
+                effective_wait = wait_seconds + PRODUCTION_CHECK_BUFFER
+
             self.logger.info(f"[{self.name}] Next overall check in {effective_wait:.0f} seconds.")
             try:
                 time.sleep(effective_wait)
@@ -1254,62 +1263,74 @@ class BatteryProducer(BaseMonitor):
                 break
 
     def _process_all_battery_factories(self):
-        """Processes all battery factories and returns the minimum wait time."""
+        """Processes all battery factories and returns the minimum wait time until the next completion."""
         now = datetime.datetime.now()
         due_paths = []
         
-        # 判斷哪些建築到期或沒在生產
+        # 1. 識別哪些工廠需要現在處理（已到期、60秒內到期、或沒在生產）
         process_threshold = now + datetime.timedelta(seconds=60)
         for path, finish_dt in self.battery_finish_times.items():
             if finish_dt is None or finish_dt <= process_threshold:
                 due_paths.append(path)
         
+        # 2. 如果沒有現在需要處理的，直接計算「離最近的未來完成時間」還有多久
         if not due_paths:
             future_times = [dt for dt in self.battery_finish_times.values() if dt and dt > now]
-            return min((dt - now).total_seconds() for dt in future_times) if future_times else 0
+            if future_times:
+                min_wait = min((dt - now).total_seconds() for dt in future_times)
+                return max(0, min_wait)
+            else:
+                return 0 # 沒有任何生產紀錄
 
         self.logger.info(f"[{self.name}] Processing due factories: {due_paths}")
         
+        # 3. 逐一處理到期的工廠
         for path in due_paths:
             building_url = self.base_url + path
-            self.logger.info(f"[{self.name}] Checking: {building_url}")
+            self.logger.info(f"[{self.name}] Checking/Starting: {building_url}")
             try:
                 self.driver.get(building_url)
-                # 等待頁面加載
+                # 等待頁面關鍵元素
                 WebDriverWait(self.driver, 20).until(
                     EC.presence_of_element_located((By.XPATH, "//h3[normalize-space(text())='Construction'] | //h3[contains(., 'Batteries')]"))
                 )
                 
-                # 檢查施工
+                # 檢查是否施工中
                 if self._check_construction_status(path):
                     continue
 
-                # 啟動或檢查生產
+                # 嘗試啟動或抓取現有的生產時間
                 self._check_and_start_battery_production(path)
-                time.sleep(random.uniform(1.0, 2.0))
+                time.sleep(random.uniform(0.5, 1.0))
 
             except Exception as e:
                 self.logger.error(f"[{self.name}] Error processing {path}: {e}")
-                self.battery_finish_times[path] = None
+                self.battery_finish_times[path] = None # 發生錯誤則下次重新檢查
         
         self._save_finish_times()
         
-        # 計算下一次等待時間
+        # 4. 再次檢查最新的 battery_finish_times，計算「下一個到期事件」的時間間隔
         now_after = datetime.datetime.now()
         future_times = [dt for dt in self.battery_finish_times.values() if dt and dt > now_after]
-        return min((dt - now_after).total_seconds() for dt in future_times) if future_times else 0
+        if future_times:
+            min_wait = min((dt - now_after).total_seconds() for dt in future_times)
+            return max(0, min_wait)
+        else:
+            return 0
 
     def _check_construction_status(self, path):
         """Checks if building is under construction and updates finish time."""
         try:
-            # 短時間等待施工標題
-            self.driver.find_element(By.XPATH, "//h3[normalize-space(text())='Construction']")
-            finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-            finish_time_str = finish_time_p.text.strip().replace('Finishes at', '').strip()
-            self.logger.info(f"[{self.name}] {path} is under construction. Finishes at: {finish_time_str}")
-            self.battery_finish_times[path] = parser.parse(finish_time_str)
-            return True
-        except (NoSuchElementException, TimeoutException):
+            # 偵測施工區塊
+            construction_elements = self.driver.find_elements(By.XPATH, "//h3[normalize-space(text())='Construction']")
+            if construction_elements:
+                finish_time_p = self.driver.find_element(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
+                finish_time_str = finish_time_p.text.strip().replace('Finishes at', '').strip()
+                self.logger.info(f"[{self.name}] {path} is under construction. Finishes at: {finish_time_str}")
+                self.battery_finish_times[path] = parser.parse(finish_time_str)
+                return True
+            return False
+        except:
             return False
 
     def _check_and_start_battery_production(self, path):
@@ -1320,33 +1341,44 @@ class BatteryProducer(BaseMonitor):
         battery_finish_time_xpath = f"//h3[contains(., 'Batteries')]/ancestor::div[contains(@class, 'row')]//p[starts-with(normalize-space(text()), 'Finishes at')]"
 
         try:
-            # 檢查是否已在生產
+            # A. 檢查是否已經在生產中
             finish_time_elements = self.driver.find_elements(By.XPATH, battery_finish_time_xpath)
             if finish_time_elements and finish_time_elements[0].is_displayed():
                 finish_time_str = finish_time_elements[0].text.strip()
-                self.logger.info(f"[{self.name}] {path} ALREADY PRODUCING. Finish: {finish_time_str}")
+                self.logger.info(f"[{self.name}] {path} is ALREADY PRODUCING. Finish: {finish_time_str}")
                 self.battery_finish_times[path] = parser.parse(finish_time_str.replace('Finishes at', '').strip())
                 return
 
-            # 嘗試啟動 Max 生產
-            self.logger.info(f"[{self.name}] Starting production for {path}...")
+            # B. 嘗試啟動生產
+            self.logger.info(f"[{self.name}] {path} is idle. Clicking 'Max' for Batteries...")
             WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, battery_max_button_xpath))).click()
-            time.sleep(0.5)
-            # 注意：根據之前 HTML，可能只有 Max 或需要點 Produce，這裡維持彈性
+            time.sleep(random.uniform(0.3, 0.6))
+            
+            # 處理可能存在的 Produce 按鈕 (依據遊戲版本而定)
             try:
-                self.driver.find_element(By.XPATH, battery_produce_button_xpath).click()
+                produce_btn = self.driver.find_element(By.XPATH, battery_produce_button_xpath)
+                if produce_btn.is_displayed():
+                    produce_btn.click()
+                    self.logger.info(f"[{self.name}] {path} 'Produce' button clicked.")
             except: pass
             
             time.sleep(2)
-            # 重新整理並驗證
+            
+            # C. 重新整理頁面以獲取最新的完成時間（這最準確）
             self.driver.get(self.base_url + path)
-            conf = WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.XPATH, battery_finish_time_xpath)))
-            new_time_str = conf.text.strip()
-            self.logger.info(f"[{self.name}] {path} STARTED. New finish: {new_time_str}")
-            self.battery_finish_times[path] = parser.parse(new_time_str.replace('Finishes at', '').strip())
+            time.sleep(1)
+            conf_elements = WebDriverWait(self.driver, 15).until(
+                EC.presence_of_all_elements_located((By.XPATH, battery_finish_time_xpath))
+            )
+            if conf_elements:
+                new_time_str = conf_elements[0].text.strip()
+                self.logger.info(f"[{self.name}] {path} Production STARTED. New finish: {new_time_str}")
+                self.battery_finish_times[path] = parser.parse(new_time_str.replace('Finishes at', '').strip())
+            else:
+                self.battery_finish_times[path] = None
 
         except Exception as e:
-            self.logger.error(f"[{self.name}] Failed to start production on {path}: {e}")
+            self.logger.error(f"[{self.name}] Failed to start/confirm production on {path}: {e}")
             self.battery_finish_times[path] = None
 
 
