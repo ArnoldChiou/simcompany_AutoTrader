@@ -61,24 +61,18 @@ PRODUCT_CONFIGS = [
         "max_buy_quantity": 500
     },
     {
-         "name": "Wood",
-         "api_url": "https://www.simcompanies.com/api/v3/market/0/106/",
-         "quality": 0,
-         "max_buy_quantity": 50000
-    },
-    {
          "name": "Silicon",
          "api_url": "https://www.simcompanies.com/api/v3/market/0/16/",
          "quality": 0,
          "max_buy_quantity": 50000
-    }
+    },
 
-    #{
-    #    "name": "PlantResearch",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 500
-    #}
+    {
+        "name": "PlantResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    }
 
     #{
     #    "name":"AerospaceResearch",
