@@ -154,28 +154,211 @@ PRODUCT_CONFIGS = [
         "api_url": "https://www.simcompanies.com/api/v3/market/0/29/",
         "quality": 0,
         "max_buy_quantity": 500
+    },
+    {
+        "name": "BreedingResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/33/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    },
+    {
+        "name": "ChemistryResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/34/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    },
+    {
+        "name": "Software",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/35/",
+        "quality": 0,
+        "max_buy_quantity": 1000
+    },
+    {
+        "name": "AutomotiveResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/58/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    },
+    {
+        "name": "FashionResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/59/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    },
+    {
+        "name": "AerospaceResearch",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/100/",
+        "quality": 0,
+        "max_buy_quantity": 500
+    },
+    {
+        "name": "Recipes",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/145/",
+        "quality": 0,
+        "max_buy_quantity": 1000
+    },
+    {
+        "name": "Dough",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/137/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Sauce",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/138/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Steak",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/7/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Sausages",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/8/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Eggs",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/9/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Milk",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/117/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "CoffeePowder",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/119/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Flour",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/133/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Bread",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/121/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "ApplePie",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/123/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "OrangeJuice",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/124/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "AppleCider",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/125/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "GingerBeer",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/126/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "FrozenPizza",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/127/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Pasta",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/128/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Butter",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/134/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Cheese",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/122/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Chocolate",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/140/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Sugar",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/135/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Hamburger",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/129/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Lasagna",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/130/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "MeatBalls",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/131/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Cocktails",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/132/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "VegetableOil",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/141/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Salad",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/142/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "Samosa",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/143/",
+        "quality": 0,
+        "max_buy_quantity": 10000
+    },
+    {
+        "name": "PumpkinSoup",
+        "api_url": "https://www.simcompanies.com/api/v3/market/0/149/",
+        "quality": 0,
+        "max_buy_quantity": 10000
     }
-
-    #{
-    #    "name":"AerospaceResearch",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/100/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 1000
-    #},
-
-    #{
-    #    "name":"Recipes",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/145/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 1000
-    #}
-
-    #{
-    #    "name":"BreedingResearch",
-    #    "api_url": "https://www.simcompanies.com/api/v3/market/0/33/",
-    #    "quality": 0,
-    #    "max_buy_quantity": 500
-    #}
 ]
 
 # --- Dynamically Generated Dictionaries (for compatibility) ---
