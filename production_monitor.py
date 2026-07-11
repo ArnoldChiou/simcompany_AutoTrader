@@ -4,6 +4,7 @@ import datetime
 import re
 import traceback
 import logging
+from logging.handlers import RotatingFileHandler
 import random
 import json
 from dateutil import parser
@@ -23,18 +24,20 @@ from selenium.common.exceptions import (
 
 from driver_utils import initialize_driver
 from email_utils import send_email_notify
+from config import POWER_PLANT_PATHS
 
 # --- Logging Setup ---
 def setup_logger(name, log_filename):
     log_path = os.path.join('record', log_filename)
-    if os.path.exists(log_path):
-        os.remove(log_path)
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
     logger = logging.getLogger(name)
     logger.setLevel(logging.INFO)
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
-    file_handler = logging.FileHandler(log_path, encoding='utf-8')
+    file_handler = RotatingFileHandler(
+        log_path, maxBytes=5 * 1024 * 1024, backupCount=5, encoding='utf-8'
+    )
     file_handler.setFormatter(formatter)
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
@@ -65,11 +68,16 @@ class BaseMonitor:
         self.user_data_dir = user_data_dir
 
     def _is_logged_in(self):
-        """Check if the user is already logged in by looking for login/signin links."""
+        """Require a positive authenticated-page indicator."""
         try:
-            # SimCompanies: if there's a 'Sign in' or 'Login' link, not logged in
             login_btns = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/signin') or contains(@href, '/login')]")
-            return not bool(login_btns)
+            if login_btns:
+                return False
+            authenticated_elements = self.driver.find_elements(
+                By.XPATH,
+                "//*[@id='js-animation-money'] | //a[contains(@href,'/landscape')] | //a[contains(@href,'/company')]"
+            )
+            return bool(authenticated_elements)
         except Exception as e:
             self.logger.warning(f"[{self.name}] Error checking login status: {e}")
             return False
@@ -491,7 +499,7 @@ class PowerPlantProducer(BaseMonitor):
                 for path, time_str in data.items():
                     if time_str:
                         try:
-                            loaded_times[path] = parser.parse(time_str)
+                            loaded_times[path] = self._parse_finish_time(time_str)
                         except (ValueError, TypeError):
                             self.logger.warning(f"[{self.name}] Invalid datetime format for {path} in {self.finish_times_file_path}: {time_str}. Setting to None.")
                             loaded_times[path] = None
@@ -522,13 +530,26 @@ class PowerPlantProducer(BaseMonitor):
                 else:
                     data_to_save[path] = None
             
-            with open(self.finish_times_file_path, 'w') as f:
+            temp_path = self.finish_times_file_path + '.tmp'
+            with open(temp_path, 'w', encoding='utf-8') as f:
                 json.dump(data_to_save, f, indent=4)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.finish_times_file_path)
             self.logger.info(f"[{self.name}] Successfully saved finish times to {self.finish_times_file_path}")
         except IOError as e:
             self.logger.error(f"[{self.name}] Error saving finish times to {self.finish_times_file_path}: {e}")
         except Exception as e:
             self.logger.error(f"[{self.name}] Unexpected error saving finish times: {e}", exc_info=True)
+
+    @staticmethod
+    def _parse_finish_time(value):
+        """Parse finish times consistently in the machine's local timezone."""
+        parsed = parser.parse(value)
+        local_tz = datetime.datetime.now().astimezone().tzinfo
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=local_tz)
+        return parsed.astimezone(local_tz)
 
     def run(self):
         """Starts the continuous production loop."""
@@ -568,10 +589,9 @@ class PowerPlantProducer(BaseMonitor):
             self.logger.info(f"\n[{self.name}] === Starting new production check cycle ===\n")
 
     def _process_plants(self):
-        now = datetime.datetime.now()
+        now = datetime.datetime.now().astimezone()
         error_occurred_in_cycle = False
         started_paths_in_cycle = []
-        opened_tabs_map = {}
         due_paths = []
         # 只處理到期的powerplant
         # Modified to include plants finishing in the next 60 seconds
@@ -590,74 +610,11 @@ class PowerPlantProducer(BaseMonitor):
 
         self.logger.info(f"[{self.name}] Due plants to process: {due_paths}")
         try:
-            num_targets = len(due_paths)
-            if num_targets == 0:
-                self.logger.info(f"[{self.name}] No due plants configured. Skipping processing.")
-                return 0
-            self.logger.info(f"[{self.name}] Attempting to open {num_targets} tabs for due power plants...")
-            initial_main_window_handle = None
-            try:
-                initial_main_window_handle = self.driver.current_window_handle
-            except WebDriverException as e:
-                self.logger.error(f"[{self.name}] Could not get initial window handle: {type(e).__name__} - {e}. Aborting.")
-                return -LONG_RETRY_DELAY
-            for idx, target_path in enumerate(due_paths):
-                url = self.base_url + target_path
-                self.logger.info(f"[{self.name}] Opening tab {idx + 1}/{num_targets} for: {url}")
-                try:
-                    current_handles_before_open = set(self.driver.window_handles)
-                    if idx == 0:
-                        if self.driver.current_url.strip('/') != url.strip('/'):
-                            self.driver.get(url)
-                        WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                        opened_tabs_map[target_path] = self.driver.current_window_handle
-                    else:
-                        self.driver.execute_script(f"window.open('{url}', '_blank');")
-                        WebDriverWait(self.driver, 10).until(
-                            lambda d: len(set(d.window_handles) - current_handles_before_open) == 1
-                        )
-                        new_window_handle = list(set(self.driver.window_handles) - current_handles_before_open)[0]
-                        self.driver.switch_to.window(new_window_handle)
-                        WebDriverWait(self.driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                        opened_tabs_map[target_path] = new_window_handle
-                    if not self.driver.current_url.strip("/").endswith(target_path.strip("/")):
-                        self.logger.warning(f"[{self.name}] Tab for {target_path} opened, but current URL is '{self.driver.current_url}'. Expected to end with '{target_path.strip('/')}'.")
-                    self.logger.info(f"[{self.name}] Successfully opened and focused tab for {target_path}.")
-                    time.sleep(random.uniform(0.8, 1.5))
-                except WebDriverException as e_tab_open:
-                    self.logger.error(f"[{self.name}] Error opening/switching to tab for {url} (Type: {type(e_tab_open).__name__}): {e_tab_open}. Skipping this plant.")
-                    error_occurred_in_cycle = True
-                    try:
-                        _ = self.driver.title
-                    except WebDriverException:
-                        self.logger.critical(f"[{self.name}] WebDriver session seems to be dead after failing to open tab for {url}. Aborting cycle.")
-                        return -LONG_RETRY_DELAY
-                    if idx == 0 and not opened_tabs_map:
-                        self.logger.critical(f"[{self.name}] Failed to process the very first target path {target_path}. WebDriver might be unusable.")
-                        return -LONG_RETRY_DELAY
-                    continue
-            self.logger.info(f"[{self.name}] Finished attempting to open tabs. {len(opened_tabs_map)} tabs were mapped.")
-            if error_occurred_in_cycle or len(opened_tabs_map) != num_targets:
-                self.logger.warning(f"[{self.name}] Potential issues during tab opening ({len(opened_tabs_map)}/{num_targets} successful). Checking driver health.")
-                try:
-                    _ = self.driver.title
-                except WebDriverException as e_dead_driver:
-                    self.logger.critical(f"[{self.name}] WebDriver session is dead BEFORE processing tabs: {e_dead_driver}. Aborting cycle.")
-                    return -LONG_RETRY_DELAY
             for target_path in due_paths:
-                if target_path not in opened_tabs_map:
-                    self.logger.warning(f"[{self.name}] Skipping processing for {target_path} as it was not successfully opened or mapped.")
-                    error_occurred_in_cycle = True
-                    continue
-                window_handle = opened_tabs_map[target_path]
-                self.logger.info(f"[{self.name}] Processing plant: {target_path} on its tab (Handle: {window_handle})")
+                self.logger.info(f"[{self.name}] Processing plant in the current tab: {target_path}")
                 try:
-                    self.driver.switch_to.window(window_handle)
-                    time.sleep(random.uniform(0.1, 0.2))
-                    if not self.driver.current_url.strip("/").endswith(target_path.strip("/")):
-                        self.logger.warning(f"[{self.name}] Switched to tab for {target_path}, but URL is '{self.driver.current_url}'. Forcing navigation.")
-                        self.driver.get(self.base_url + target_path)
-                        WebDriverWait(self.driver, 15).until(EC.url_contains(target_path.split('/')[-2]))
+                    self.driver.get(self.base_url + target_path)
+                    WebDriverWait(self.driver, 15).until(EC.url_contains(target_path.split('/')[-2]))
                     WebDriverWait(self.driver, 20).until(
                         EC.presence_of_element_located((By.XPATH, "//button[contains(@class, 'btn-secondary') and normalize-space(.)='Reposition']"))
                     )
@@ -666,14 +623,8 @@ class PowerPlantProducer(BaseMonitor):
                         started_paths_in_cycle.append(target_path)
                     else:
                         self._get_existing_finish_time(target_path)
-                except NoSuchWindowException:
-                    self.logger.error(f"[{self.name}] Window for {target_path} (Handle: {window_handle}) not found. It might have closed. Skipping.")
-                    error_occurred_in_cycle = True
-                    try: _ = self.driver.title
-                    except WebDriverException:
-                        self.logger.critical(f"[{self.name}] WebDriver session dead after NoSuchWindowException. Aborting.")
-                        return -LONG_RETRY_DELAY
-                    continue
+                        if self.plant_finish_times.get(target_path) is None:
+                            error_occurred_in_cycle = True
                 except TimeoutException as e_timeout:
                     self.logger.error(f"[{self.name}] Timeout processing {target_path} at {self.driver.current_url}: {e_timeout}", exc_info=False)
                     error_occurred_in_cycle = True
@@ -690,13 +641,6 @@ class PowerPlantProducer(BaseMonitor):
                     self.logger.error(f"[{self.name}] Unexpected error processing {target_path} at {self.driver.current_url}: {e_plant}", exc_info=True)
                     error_occurred_in_cycle = True
                 time.sleep(random.uniform(0.5, 1.0))
-            if initial_main_window_handle:
-                try:
-                    self.driver.switch_to.window(initial_main_window_handle)
-                except NoSuchWindowException:
-                    self.logger.warning(f"[{self.name}] Initial main window handle {initial_main_window_handle} no longer valid.")
-                except WebDriverException as e_switch_main:
-                    self.logger.warning(f"[{self.name}] Error switching back to initial main window: {e_switch_main}")
         except KeyboardInterrupt:
             self.logger.info(f"[{self.name}] Processing in _process_plants interrupted by user.")
             return None
@@ -711,8 +655,11 @@ class PowerPlantProducer(BaseMonitor):
         
         self._save_finish_times()
 
+        if error_occurred_in_cycle:
+            return -DEFAULT_RETRY_DELAY
+
         # 計算下次最早的完成時間
-        now = datetime.datetime.now()
+        now = datetime.datetime.now().astimezone()
         future_times = [dt for dt in self.plant_finish_times.values() if dt is not None and dt > now]
         if future_times:
             min_wait = min((dt - now).total_seconds() for dt in future_times)
@@ -731,7 +678,7 @@ class PowerPlantProducer(BaseMonitor):
                     finish_time_str = finish_time_elements[0].text.strip()
                     self.logger.info(f"[{self.name}] {path} is ALREADY PRODUCING. Finish time: {finish_time_str}")
                     try:
-                        finish_dt = parser.parse(finish_time_str.replace('Finishes at', '').strip())
+                        finish_dt = self._parse_finish_time(finish_time_str.replace('Finishes at', '').strip())
                         self.plant_finish_times[path] = finish_dt
                     except Exception:
                         self.plant_finish_times[path] = None
@@ -758,7 +705,7 @@ class PowerPlantProducer(BaseMonitor):
                 if new_finish_time_elements and new_finish_time_elements[0].is_displayed():
                     new_finish_time_str = new_finish_time_elements[0].text.strip()
                     try:
-                        finish_dt = parser.parse(new_finish_time_str.replace('Finishes at', '').strip())
+                        finish_dt = self._parse_finish_time(new_finish_time_str.replace('Finishes at', '').strip())
                         self.plant_finish_times[path] = finish_dt
                     except Exception:
                         self.plant_finish_times[path] = None
@@ -799,7 +746,7 @@ class PowerPlantProducer(BaseMonitor):
                 finish_time_str = finish_time_elements[0].text.strip()
                 self.logger.info(f"[{self.name}] {path} Found existing completion time: {finish_time_str}")
                 try:
-                    finish_dt = parser.parse(finish_time_str.replace('Finishes at', '').strip())
+                    finish_dt = self._parse_finish_time(finish_time_str.replace('Finishes at', '').strip())
                     self.plant_finish_times[path] = finish_dt
                 except Exception:
                     self.plant_finish_times[path] = None
@@ -1404,15 +1351,10 @@ def main():
         monitor.run()
     elif choice == "2":
         logger_power = setup_logger('PowerPlantProducer', 'monitor_powerplant.log')
-        pp_paths = [
-            "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
-            "/b/43058380/", "/b/39825725/", "/b/39825679/", "/b/39693844/",
-            "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
-        ]
         user_data_dir_powerplant = os.getenv("USER_DATA_DIR_powerplant")
         if not user_data_dir_powerplant:
             logger_power.warning("USER_DATA_DIR_powerplant not found in .env. Using default Chrome profile.")
-        producer = PowerPlantProducer(pp_paths, logger=logger_power, user_data_dir=user_data_dir_powerplant)
+        producer = PowerPlantProducer(POWER_PLANT_PATHS, logger=logger_power, user_data_dir=user_data_dir_powerplant)
         producer.run()
     elif choice == "3":
         logger_oil = setup_logger('OilRigMonitor', 'monitor_oilrig.log')

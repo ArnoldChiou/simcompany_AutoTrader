@@ -1,5 +1,6 @@
 /.env
-/__pycache__
+__pycache__/
+*.pyc
 /record/*
 /secret/credentials.json
 /secret/token.json

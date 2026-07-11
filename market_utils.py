@@ -6,21 +6,39 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import re
 
-def get_market_data(session, api_url, target_quality, timeout=20, return_order_detail=False):
+def get_market_data(session, api_url, target_quality, timeout=20, return_order_detail=False, error_details=None):
+    if error_details is not None:
+        error_details.clear()
+
+    def set_error(kind, message, status_code=None, retry_after=None):
+        if error_details is not None:
+            error_details.update({
+                'kind': kind,
+                'message': message,
+                'status_code': status_code,
+                'retry_after': retry_after,
+            })
+
     print(f"--- Start processing Q{target_quality} market data (API: {api_url}) ---")
     try:
         response = session.get(api_url, timeout=timeout)
+        if response.status_code == 429:
+            retry_after = response.headers.get('Retry-After')
+            set_error('rate_limited', 'HTTP 429 Too Many Requests', 429, retry_after)
         response.raise_for_status()
         try:
             orders = response.json()
         except json.JSONDecodeError:
+            set_error('invalid_json', 'API response was not valid JSON', response.status_code)
             print("Error: Unable to parse JSON data from API response.")
             print(f"Response content: {response.text[:500]}...")
             return None
         if not isinstance(orders, list):
+            set_error('invalid_response', 'API response was not a list', response.status_code)
             print("Error: API response format is not the expected list.")
             return None
         if not orders:
+            set_error('empty_market', 'API returned no market orders', response.status_code)
             print("Warning: No order data found in API response.")
             return None
         filtered = []
@@ -43,6 +61,7 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
                 else:
                     filtered.append(price)
         if not filtered:
+            set_error('no_valid_orders', f'No valid Q{target_quality} sell orders', response.status_code)
             print(f"Warning: No valid Q{target_quality} sell orders found.")
             return None
         if return_order_detail:
@@ -67,12 +86,18 @@ def get_market_data(session, api_url, target_quality, timeout=20, return_order_d
             else:
                 return None
     except requests.exceptions.Timeout:
+        set_error('timeout', f'Request timed out after {timeout}s')
         print(f"Error: Request to API {api_url} timed out.")
         return None
     except requests.exceptions.RequestException as e:
+        status_code = e.response.status_code if e.response is not None else None
+        if status_code != 429:
+            kind = 'server_error' if status_code and status_code >= 500 else 'http_error'
+            set_error(kind, str(e), status_code)
         print(f"Error: Request to API {api_url} failed: {e}")
         return None
     except Exception as e:
+        set_error('unexpected_error', f'{type(e).__name__}: {e}')
         print(f"Error: Unexpected error occurred while processing market data:")
         traceback.print_exc()
         return None

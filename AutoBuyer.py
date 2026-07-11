@@ -8,7 +8,9 @@ from config import (
     MARKET_HEADERS, COOKIES, CASH_API_URL,
     BUY_THRESHOLD_PERCENTAGE, DEFAULT_CHECK_INTERVAL_SECONDS,
     PURCHASE_WAIT_MULTIPLIER, MARKET_REQUEST_TIMEOUT as REQUEST_TIMEOUT,
-    MONEY_REQUEST_TIMEOUT
+    MONEY_REQUEST_TIMEOUT, BUY_THRESHOLDS, MAX_TOTAL_COST, MIN_CASH_RESERVE,
+    AUTOBUY_PRODUCT_DELAY_MIN_SECONDS, AUTOBUY_PRODUCT_DELAY_MAX_SECONDS,
+    AUTOBUY_RATE_LIMIT_BASE_DELAY_SECONDS
 )
 from market_utils import get_market_data, get_current_money
 from driver_utils import initialize_driver
@@ -37,9 +39,7 @@ class AutoBuyer:
         self.session = requests.Session() # Keep requests session for market data fetching
         self.session.headers.update(self.MARKET_HEADERS)
         self.driver = None # Initialize driver to None, will be created in main_loop
-        # --- Add market data cache ---
-        self._market_data_cache = {}  # key: (product_name, quality), value: (timestamp, data)
-        self._market_data_cache_ttl = 60  # seconds, adjust as needed
+        self._consecutive_rate_limits = 0
 
         # --- Setup for error logging ---
         self.error_log_path = os.path.join('record', 'autobuyer_error.log')
@@ -59,7 +59,7 @@ class AutoBuyer:
         """Parse resource ID from product API URL"""
         try:
             path_parts = urlparse(url).path.strip('/').split('/')
-            if len(path_parts) >= 4 and path_parts[0] == 'api' and path_parts[2] == 'market':
+            if len(path_parts) >= 5 and path_parts[0] == 'api' and path_parts[2] == 'market':
                 return int(path_parts[4])
         except (ValueError, IndexError) as e:
             print(f"Error parsing resource ID ({url}): {e}")
@@ -67,27 +67,62 @@ class AutoBuyer:
 
     # --- Modified get_market_data to accept product details ---
     def get_market_data(self, product_name, product_info):
-        # --- Use cache to reduce web requests ---
-        cache_key = (product_name, product_info['quality'])
-        now = time.time()
-        if cache_key in self._market_data_cache:
-            ts, data = self._market_data_cache[cache_key]
-            if now - ts < self._market_data_cache_ttl:
-                print(f"[CACHE] Using cached market data for {product_name} (Q{product_info['quality']})")
-                return data
-        temp_session = requests.Session()
-        temp_session.headers.update(self.MARKET_HEADERS)
         print(f"--- Start processing {product_name} (Q{product_info['quality']}) market data ---")
+        error_details = {}
         data = get_market_data(
-            temp_session,
+            self.session,
             product_info['url'], # Use URL from product_info
             product_info['quality'], # Use quality from product_info
             timeout=REQUEST_TIMEOUT,
-            return_order_detail=True
+            return_order_detail=True,
+            error_details=error_details
         )
-        # --- Update cache ---
-        self._market_data_cache[cache_key] = (now, data)
-        return data
+        return data, error_details
+
+    def _log_trade(self, status, product_name, resource_id, order_id, price, quantity, detail=""):
+        """Append an auditable trade event. Only CONFIRMED is considered successful."""
+        import datetime
+        os.makedirs('record', exist_ok=True)
+        log_entry = (
+            f"{datetime.datetime.now().isoformat()} | Status:{status} | Product:{product_name} | "
+            f"ResourceID:{resource_id} | OrderID:{order_id} | Price:{price} | "
+            f"Quantity:{quantity} | Detail:{detail}\n"
+        )
+        with open('record/trade_events.txt', 'a', encoding='utf-8') as f:
+            f.write(log_entry)
+        if status == "CONFIRMED":
+            with open('record/successful_trade.txt', 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+
+    def _wait_for_purchase_confirmation(self, previous_price):
+        """Confirm success from an explicit success message or a changed first market order."""
+        success_xpath = (
+            "//*[contains(@class,'alert-success') or contains(@class,'toast-success') "
+            "or contains(translate(normalize-space(.),'PURCHASED','purchased'),'purchased')]"
+        )
+        try:
+            def market_price_changed(driver):
+                rows = driver.find_elements(By.CSS_SELECTOR, "tr[aria-label*='market order']")
+                if not rows:
+                    return False
+                cells = rows[0].find_elements(By.TAG_NAME, "td")
+                if len(cells) < 4:
+                    return False
+                try:
+                    new_price = float(cells[3].text.strip().replace('$', ''))
+                except (TypeError, ValueError):
+                    return False
+                return abs(new_price - previous_price) > 0.000001
+
+            WebDriverWait(self.driver, 12).until(
+                EC.any_of(
+                    EC.visibility_of_element_located((By.XPATH, success_xpath)),
+                    market_price_changed
+                )
+            )
+            return True
+        except TimeoutException:
+            return False
 
     def _get_current_market_price(self, driver, product_name): # Added product_name for logging
         """使用 Selenium 取得網頁上第一個訂單的價格 (float)，使用 aria-label 定位並加入等待機制"""
@@ -161,6 +196,10 @@ class AutoBuyer:
 
         buy_quantity = min(quantity_available, self.MAX_BUY_QUANTITY.get(product_name, float('inf'))) # Use product-specific max quantity
 
+        max_total_cost = MAX_TOTAL_COST.get(product_name)
+        if max_total_cost:
+            buy_quantity = min(buy_quantity, int(max_total_cost // price))
+
         if buy_quantity <= 0:
             print("Error: Calculated buy quantity is 0 or less, canceling purchase.")
             return False
@@ -168,6 +207,17 @@ class AutoBuyer:
         print(f"Attempting to buy quantity: {buy_quantity}")
 
         try:
+            available_cash = get_current_money(self.driver)
+            if available_cash is None:
+                self._log_trade("REJECTED", product_name, resource_id, order_id, price, buy_quantity, "cash unavailable")
+                return False
+            affordable_quantity = int(max(0, available_cash - MIN_CASH_RESERVE) // price)
+            buy_quantity = min(buy_quantity, affordable_quantity)
+            if buy_quantity <= 0:
+                self._log_trade("REJECTED", product_name, resource_id, order_id, price, 0, "cash reserve")
+                print(f"Insufficient spendable cash after keeping reserve ${MIN_CASH_RESERVE:,.2f}.")
+                return False
+
             if self.driver.current_url != market_page_url:
                 print(f"Warning: Not on target market page ({product_name}), navigating to: {market_page_url}")
                 self.driver.get(market_page_url)
@@ -216,8 +266,10 @@ class AutoBuyer:
             else:
                 print(f"Successfully filled in quantity: {actual_value}")
 
-            buy_button_selector = 'button.btn.btn-primary'
-            buy_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, buy_button_selector)))
+            purchase_form = quantity_input.find_element(By.XPATH, "./ancestor::form[1]")
+            buy_button = WebDriverWait(purchase_form, 15).until(
+                lambda form: form.find_element(By.XPATH, ".//button[contains(@class,'btn-primary') and not(@disabled)]")
+            )
 
             is_button_enabled = False
             for _ in range(10):
@@ -234,40 +286,17 @@ class AutoBuyer:
                 return False
 
             print("Clicking buy button...")
+            self._log_trade("ATTEMPTED", product_name, resource_id, order_id, current_market_price, buy_quantity)
             buy_button.click()
 
-            try:
-                print("Buy button clicked, waiting briefly...")
-                time.sleep(3)
-                print(f">>> Selenium buy operation ({product_name}) executed (no immediate error detected) <<<")
-
-                try:
-                    import datetime
-                    timestamp = datetime.datetime.now().isoformat()
-                    log_entry = f"{timestamp} | Product:{product_name} | ResourceID:{resource_id} | OrderID:{order_id} | Price:{price} | Quantity:{buy_quantity} | Quality:{target_quality}\n"
-                    if not os.path.exists('record'):
-                        os.makedirs('record')
-                    with open('record/successful_trade.txt', 'a', encoding='utf-8') as f:
-                        f.write(log_entry)
-                    print(f"Trade logged: {log_entry.strip()}")
-                except Exception as log_err:
-                    print(f"[Log] Failed to write to successful_trade file: {log_err}")
-                print(f"===================================")
+            if self._wait_for_purchase_confirmation(current_market_price):
+                self._log_trade("CONFIRMED", product_name, resource_id, order_id, current_market_price, buy_quantity)
+                print(f">>> Purchase confirmed for {product_name} <<<")
                 return True
 
-            except TimeoutException:
-                try:
-                    error_element_xpath = "//div[contains(@class, 'error-message') or contains(@class, 'alert-danger') or contains(@class, 'alert-warning')]"
-                    error_message = self.driver.find_element(By.XPATH, error_element_xpath).text
-                    err_msg = f"Selenium purchase failed ({product_name}): Detected error/warning message: {error_message}"
-                    print(f"XXX {err_msg} XXX")
-                    self._log_error_message(err_msg)
-                except NoSuchElementException:
-                    err_msg = f"Selenium purchase timeout ({product_name}): No success or error indicator detected."
-                    print(f"XXX {err_msg} XXX")
-                    self._log_error_message(err_msg)
-                print(f"===================================")
-                return False
+            self._log_trade("UNKNOWN", product_name, resource_id, order_id, current_market_price, buy_quantity, "no confirmation")
+            self._log_error_message(f"Purchase result unknown for {product_name}; no confirmation appeared.")
+            return False
 
         except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e_sel_op:
             err_msg = f"Selenium purchase failed ({product_name}): Error finding element or during operation: {type(e_sel_op).__name__} - {e_sel_op}"
@@ -311,16 +340,25 @@ class AutoBuyer:
 
                     print(f"\n--- Checking product: {product_name} (Q{product_info['quality']}) ---")
 
-                    market_data = self.get_market_data(product_name, product_info)
+                    market_data, fetch_error = self.get_market_data(product_name, product_info)
 
                     if market_data is None:
-                        # This indicates a failure in get_market_data, e.g. 429 error.
-                        # market_utils.get_market_data is expected to print the specific error.
-                        err_msg = f"Failed to fetch market data for {product_name}. Assuming API issue (e.g., rate limit). Backing off for this cycle."
-                        print(err_msg)
-                        self._log_error_message(err_msg) # Log the error
-                        api_error_in_cycle = True
-                        break  # Exit the product loop immediately to enforce backoff
+                        kind = fetch_error.get('kind', 'unknown')
+                        status_code = fetch_error.get('status_code')
+                        message = fetch_error.get('message', 'No details')
+                        retry_after = fetch_error.get('retry_after')
+                        detail = (
+                            f"Market fetch failed for {product_name}: kind={kind}, "
+                            f"http_status={status_code}, retry_after={retry_after}, message={message}"
+                        )
+                        print(detail)
+                        if kind not in ('empty_market', 'no_valid_orders'):
+                            self._log_error_message(detail)
+                        if kind == 'rate_limited':
+                            api_error_in_cycle = True
+                            break
+                        time.sleep(AUTOBUY_PRODUCT_DELAY_MIN_SECONDS)
+                        continue
 
                     # Proceed if market_data is not None
                     if 'lowest_order' in market_data and 'second_lowest_price' in market_data:
@@ -328,8 +366,9 @@ class AutoBuyer:
                         lowest_price = lowest_order['price']
                         second_lowest_price = market_data['second_lowest_price']
 
-                        buy_threshold_price = second_lowest_price * BUY_THRESHOLD_PERCENTAGE
-                        print(f"Threshold calculation ({product_name}): 2nd lowest price ${second_lowest_price:.3f} at {BUY_THRESHOLD_PERCENTAGE*100:.1f}% = ${buy_threshold_price:.3f}")
+                        threshold = BUY_THRESHOLDS.get(product_name, BUY_THRESHOLD_PERCENTAGE)
+                        buy_threshold_price = second_lowest_price * threshold
+                        print(f"Threshold calculation ({product_name}): 2nd lowest price ${second_lowest_price:.3f} at {threshold*100:.1f}% = ${buy_threshold_price:.3f}")
 
                         if lowest_price < buy_threshold_price:
                             print(f"***> Condition met ({product_name})! Lowest price ${lowest_price:.3f} < threshold ${buy_threshold_price:.3f}")
@@ -437,15 +476,13 @@ class AutoBuyer:
                         err_msg = f"Not enough market data obtained this check ({product_name}: missing lowest order and/or second lowest price), will retry later."
                         print(err_msg)
                         self._log_error_message(err_msg) # Log the error
-                        # If market_data is incomplete (e.g. after a 429 error was logged by a utility),
-                        # treat this as an API error to trigger backoff.
-                        print(f"Assuming API issue for {product_name} due to incomplete data. Backing off for this cycle.")
-                        api_error_in_cycle = True
-                        break  # Exit the product loop immediately to enforce backoff
 
                     if not api_error_in_cycle:  # Only sleep if no API error caused an early break
                         # --- Add random jitter between product checks (2-8s) ---
-                        sleep_time = random.uniform(2, 8)
+                        sleep_time = random.uniform(
+                            AUTOBUY_PRODUCT_DELAY_MIN_SECONDS,
+                            AUTOBUY_PRODUCT_DELAY_MAX_SECONDS
+                        )
                         print(f"Sleeping {sleep_time:.2f} seconds before next product check...")
                         time.sleep(sleep_time)
 
@@ -467,10 +504,15 @@ class AutoBuyer:
                 sleep_duration_seconds = random.uniform(min_sleep, max_sleep)
 
                 if api_error_in_cycle:
-                    # Override with a longer, fixed backoff if an API error (e.g., 429) occurred
-                    sleep_duration_seconds = max(120.0, sleep_duration_seconds)  # At least 2 minutes backoff
-                    print(f"\nAPI error occurred in this cycle. Applying a fixed backoff delay of {sleep_duration_seconds:.2f} seconds.")
+                    self._consecutive_rate_limits += 1
+                    backoff = min(
+                        AUTOBUY_RATE_LIMIT_BASE_DELAY_SECONDS * (2 ** (self._consecutive_rate_limits - 1)),
+                        1800
+                    )
+                    sleep_duration_seconds = max(backoff, sleep_duration_seconds)
+                    print(f"\nHTTP 429 occurred. Consecutive rate limits: {self._consecutive_rate_limits}; backing off {sleep_duration_seconds:.2f}s.")
                 else:
+                    self._consecutive_rate_limits = 0
                     print(f"\nAll product checks complete for this cycle, sleeping for {sleep_duration_seconds:.2f} seconds...")
 
                 time.sleep(sleep_duration_seconds)

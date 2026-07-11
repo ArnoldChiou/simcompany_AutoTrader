@@ -13,7 +13,7 @@ from production_monitor import (
 )
 from config import (
     TARGET_PRODUCTS, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
-    MARKET_HEADERS # Import MARKET_HEADERS
+    MARKET_HEADERS, POWER_PLANT_PATHS # Import MARKET_HEADERS
 )
 
 def run_auto_buyer():
@@ -69,13 +69,8 @@ def run_forest_nursery_monitor(logger):
 
 def run_power_plant_producer(logger):
     """Starts the Power Plant producer."""
-    pp_paths = [
-        "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
-        "/b/39825725/", "/b/39825679/", "/b/39693844/",
-        "/b/39825691/", "/b/39825676/", "/b/39825686/", "/b/41178098/",
-    ] # Or load from config
     user_data_dir = os.getenv("USER_DATA_DIR_powerplant")
-    producer = PowerPlantProducer(pp_paths, logger=logger, user_data_dir=user_data_dir)
+    producer = PowerPlantProducer(POWER_PLANT_PATHS, logger=logger, user_data_dir=user_data_dir)
     producer.run()
 
 
