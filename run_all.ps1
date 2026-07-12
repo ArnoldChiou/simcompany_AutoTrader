@@ -45,7 +45,7 @@ foreach ($jobDef in $jobDefinitions) {
         $jobs += Start-Job -Name $jobDef.name -ScriptBlock {
             param($projectPath, $cmd)
             Set-Location $projectPath
-            python -c $cmd
+            python -u -c $cmd
         } -ArgumentList $projectPath, $jobDef.cmd
         Start-Sleep -Seconds 10
     } else {

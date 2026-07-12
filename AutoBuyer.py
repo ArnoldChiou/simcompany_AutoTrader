@@ -94,35 +94,45 @@ class AutoBuyer:
             with open('record/successful_trade.txt', 'a', encoding='utf-8') as f:
                 f.write(log_entry)
 
-    def _wait_for_purchase_confirmation(self, previous_price):
-        """Confirm success from an explicit success message or a changed first market order."""
+    def _wait_for_purchase_confirmation(self, previous_row_html):
+        """Return (status, detail) after checking UI messages and market-row changes."""
         success_xpath = (
             "//*[contains(@class,'alert-success') or contains(@class,'toast-success') "
             "or contains(translate(normalize-space(.),'PURCHASED','purchased'),'purchased')]"
         )
-        try:
-            def market_price_changed(driver):
-                rows = driver.find_elements(By.CSS_SELECTOR, "tr[aria-label*='market order']")
-                if not rows:
-                    return False
-                cells = rows[0].find_elements(By.TAG_NAME, "td")
-                if len(cells) < 4:
-                    return False
-                try:
-                    new_price = float(cells[3].text.strip().replace('$', ''))
-                except (TypeError, ValueError):
-                    return False
-                return abs(new_price - previous_price) > 0.000001
+        error_xpath = (
+            "//*[contains(@class,'alert-danger') or contains(@class,'alert-warning') "
+            "or contains(@class,'error-message') or contains(@class,'toast-error')]"
+        )
+        started_at = time.monotonic()
 
-            WebDriverWait(self.driver, 12).until(
-                EC.any_of(
-                    EC.visibility_of_element_located((By.XPATH, success_xpath)),
-                    market_price_changed
-                )
-            )
-            return True
-        except TimeoutException:
+        def detect_result(driver):
+            errors = driver.find_elements(By.XPATH, error_xpath)
+            for element in errors:
+                if element.is_displayed():
+                    message = element.text.strip() or "Purchase rejected by page"
+                    return ("rejected", message)
+
+            successes = driver.find_elements(By.XPATH, success_xpath)
+            for element in successes:
+                if element.is_displayed():
+                    return ("confirmed", element.text.strip() or "Success message displayed")
+
+            rows = driver.find_elements(By.CSS_SELECTOR, "tr[aria-label*='market order']")
+            if not rows:
+                if time.monotonic() - started_at >= 1.5:
+                    return ("confirmed", "First market order disappeared")
+                return False
+
+            current_row_html = rows[0].get_attribute("outerHTML")
+            if previous_row_html and current_row_html != previous_row_html:
+                return ("confirmed", "First market order price or quantity changed")
             return False
+
+        try:
+            return WebDriverWait(self.driver, 12, poll_frequency=0.4).until(detect_result)
+        except TimeoutException:
+            return ("unknown", "No success, error, or market-order change detected within 12 seconds")
 
     def _get_current_market_price(self, driver, product_name): # Added product_name for logging
         """使用 Selenium 取得網頁上第一個訂單的價格 (float)，使用 aria-label 定位並加入等待機制"""
@@ -286,16 +296,24 @@ class AutoBuyer:
                 return False
 
             print("Clicking buy button...")
+            market_rows = self.driver.find_elements(By.CSS_SELECTOR, "tr[aria-label*='market order']")
+            previous_row_html = market_rows[0].get_attribute("outerHTML") if market_rows else None
             self._log_trade("ATTEMPTED", product_name, resource_id, order_id, current_market_price, buy_quantity)
             buy_button.click()
 
-            if self._wait_for_purchase_confirmation(current_market_price):
-                self._log_trade("CONFIRMED", product_name, resource_id, order_id, current_market_price, buy_quantity)
+            result_status, result_detail = self._wait_for_purchase_confirmation(previous_row_html)
+            if result_status == "confirmed":
+                self._log_trade("CONFIRMED", product_name, resource_id, order_id, current_market_price, buy_quantity, result_detail)
                 print(f">>> Purchase confirmed for {product_name} <<<")
                 return True
 
-            self._log_trade("UNKNOWN", product_name, resource_id, order_id, current_market_price, buy_quantity, "no confirmation")
-            self._log_error_message(f"Purchase result unknown for {product_name}; no confirmation appeared.")
+            if result_status == "rejected":
+                self._log_trade("REJECTED", product_name, resource_id, order_id, current_market_price, buy_quantity, result_detail)
+                self._log_error_message(f"Purchase rejected for {product_name}: {result_detail}")
+                return False
+
+            self._log_trade("UNKNOWN", product_name, resource_id, order_id, current_market_price, buy_quantity, result_detail)
+            self._log_error_message(f"Purchase result unknown for {product_name}: {result_detail}")
             return False
 
         except (TimeoutException, NoSuchElementException, StaleElementReferenceException) as e_sel_op:
@@ -458,9 +476,7 @@ class AutoBuyer:
                                 if success:
                                     print(f"Selenium buy operation ({product_name}) completed successfully.")
                                 else:
-                                    err_msg = f"Selenium buy operation ({product_name}) failed or not executed."
-                                    print(err_msg)
-                                    self._log_error_message(err_msg) # Log the failure
+                                    print(f"Selenium buy operation ({product_name}) was not confirmed; see trade_events.txt for status.")
                             else:
                                 err_msg = f"Login not confirmed ({product_name}), skipping this purchase attempt."
                                 print(err_msg)
