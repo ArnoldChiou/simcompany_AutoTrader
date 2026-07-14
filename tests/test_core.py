@@ -38,6 +38,9 @@ class AutoBuyerTests(unittest.TestCase):
         buyer = AutoBuyer({}, {}, {}, None, None, None)
         self.assertIsNone(buyer._extract_resource_id("https://example.test/not-market"))
 
+    def test_parse_price_with_thousands_separator(self):
+        self.assertEqual(AutoBuyer._parse_price_text("$2,200.000"), 2200.0)
+
 
 class PowerPlantTests(unittest.TestCase):
     def test_finish_time_is_timezone_aware(self):

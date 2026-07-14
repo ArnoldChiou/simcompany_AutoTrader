@@ -65,6 +65,16 @@ class AutoBuyer:
             print(f"Error parsing resource ID ({url}): {e}")
         return None
 
+    @staticmethod
+    def _parse_price_text(price_text):
+        """Convert displayed market prices such as '$2,200.000' to float."""
+        if price_text is None:
+            raise ValueError("Price text is missing")
+        normalized = price_text.strip().replace('$', '').replace(',', '')
+        if not normalized:
+            raise ValueError("Price text is empty")
+        return float(normalized)
+
     # --- Modified get_market_data to accept product details ---
     def get_market_data(self, product_name, product_info):
         print(f"--- Start processing {product_name} (Q{product_info['quality']}) market data ---")
@@ -149,13 +159,13 @@ class AutoBuyer:
                 # 直接取第四個 td 的文本內容
                 price_text_raw = tds[3].text 
                 
-                price_text = price_text_raw.strip().replace('$', '')
+                price_text = price_text_raw.strip().replace('$', '').replace(',', '')
                 if not price_text: # 檢查處理後的價格文本是否為空
                     print(f"[Warning] [{product_name}] Price text is empty after stripping from 4th td.")
                     self._log_error_message(f"[{product_name}] Price text empty in 4th td. Row HTML: {first_row.get_attribute('outerHTML')}")
                     return None
                 try:
-                    return float(price_text)
+                    return self._parse_price_text(price_text_raw)
                 except ValueError:
                     print(f"[Warning] [{product_name}] Could not convert price text '{price_text}' to float.")
                     self._log_error_message(f"[{product_name}] ValueError converting price text to float: '{price_text}'. Row HTML: {first_row.get_attribute('outerHTML')}")
