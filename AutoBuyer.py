@@ -10,7 +10,8 @@ from config import (
     PURCHASE_WAIT_MULTIPLIER, MARKET_REQUEST_TIMEOUT as REQUEST_TIMEOUT,
     MONEY_REQUEST_TIMEOUT, BUY_THRESHOLDS, MAX_TOTAL_COST, MIN_CASH_RESERVE,
     AUTOBUY_PRODUCT_DELAY_MIN_SECONDS, AUTOBUY_PRODUCT_DELAY_MAX_SECONDS,
-    AUTOBUY_RATE_LIMIT_BASE_DELAY_SECONDS
+    AUTOBUY_RATE_LIMIT_BASE_DELAY_SECONDS, AUTOBUY_PRICE_HISTORY_SIZE,
+    AUTOBUY_PRICE_HISTORY_MIN_SAMPLES, AUTOBUY_AVERAGE_DISCOUNT_PERCENTAGE
 )
 from market_utils import get_market_data, get_current_money
 from driver_utils import initialize_driver
@@ -45,6 +46,8 @@ class AutoBuyer:
         self.error_log_path = os.path.join('record', 'autobuyer_error.log')
         if not os.path.exists('record'):
             os.makedirs('record')
+        self.price_history_path = os.path.join('record', 'market_price_history.json')
+        self._price_history = self._load_price_history()
 
     def _log_error_message(self, message):
         try:
@@ -54,6 +57,65 @@ class AutoBuyer:
                 f.write(f"[{timestamp}] {message}\n")
         except Exception as e:
             print(f"CRITICAL: Failed to write to error log: {e}") # Print to console if logging itself fails
+
+    def _load_price_history(self):
+        try:
+            if not os.path.exists(self.price_history_path):
+                return {}
+            with open(self.price_history_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("Price history root must be an object")
+            cleaned = {}
+            for product_name, entries in data.items():
+                if not isinstance(entries, list):
+                    continue
+                valid_entries = []
+                for entry in entries[-AUTOBUY_PRICE_HISTORY_SIZE:]:
+                    if not isinstance(entry, dict):
+                        continue
+                    try:
+                        price = float(entry['price'])
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if price > 0:
+                        valid_entries.append({
+                            'timestamp': entry.get('timestamp'),
+                            'price': price,
+                        })
+                cleaned[product_name] = valid_entries
+            return cleaned
+        except (OSError, ValueError, json.JSONDecodeError) as e:
+            self._log_error_message(f"Failed to load price history: {type(e).__name__} - {e}")
+            return {}
+
+    def _save_price_history(self):
+        temp_path = self.price_history_path + '.tmp'
+        try:
+            with open(temp_path, 'w', encoding='utf-8') as f:
+                json.dump(self._price_history, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temp_path, self.price_history_path)
+        except OSError as e:
+            self._log_error_message(f"Failed to save price history: {type(e).__name__} - {e}")
+
+    def _get_historical_average(self, product_name):
+        entries = self._price_history.get(product_name, [])
+        prices = [entry['price'] for entry in entries if entry.get('price', 0) > 0]
+        if not prices:
+            return None, 0
+        return sum(prices) / len(prices), len(prices)
+
+    def _record_market_price(self, product_name, price):
+        import datetime
+        entries = self._price_history.setdefault(product_name, [])
+        entries.append({
+            'timestamp': datetime.datetime.now().isoformat(),
+            'price': float(price),
+        })
+        self._price_history[product_name] = entries[-AUTOBUY_PRICE_HISTORY_SIZE:]
+        self._save_price_history()
 
     def _extract_resource_id(self, url):
         """Parse resource ID from product API URL"""
@@ -388,6 +450,25 @@ class AutoBuyer:
                         time.sleep(AUTOBUY_PRODUCT_DELAY_MIN_SECONDS)
                         continue
 
+                    historical_average = None
+                    history_sample_count = 0
+                    lowest_order_for_history = market_data.get('lowest_order')
+                    if lowest_order_for_history:
+                        lowest_price_for_history = lowest_order_for_history['price']
+                        historical_average, history_sample_count = self._get_historical_average(product_name)
+                        self._record_market_price(product_name, lowest_price_for_history)
+                        if historical_average is None:
+                            print(
+                                f"Price history ({product_name}): recorded first sample "
+                                f"${lowest_price_for_history:.3f}."
+                            )
+                        else:
+                            print(
+                                f"Price history ({product_name}): previous {history_sample_count} samples average "
+                                f"${historical_average:.3f}; current ${lowest_price_for_history:.3f}; "
+                                f"stored latest {min(history_sample_count + 1, AUTOBUY_PRICE_HISTORY_SIZE)} samples."
+                            )
+
                     # Proceed if market_data is not None
                     if 'lowest_order' in market_data and 'second_lowest_price' in market_data:
                         lowest_order = market_data['lowest_order']
@@ -398,8 +479,37 @@ class AutoBuyer:
                         buy_threshold_price = second_lowest_price * threshold
                         print(f"Threshold calculation ({product_name}): 2nd lowest price ${second_lowest_price:.3f} at {threshold*100:.1f}% = ${buy_threshold_price:.3f}")
 
-                        if lowest_price < buy_threshold_price:
-                            print(f"***> Condition met ({product_name})! Lowest price ${lowest_price:.3f} < threshold ${buy_threshold_price:.3f}")
+                        history_ready = history_sample_count >= AUTOBUY_PRICE_HISTORY_MIN_SAMPLES
+                        average_threshold_price = (
+                            historical_average * (1 - AUTOBUY_AVERAGE_DISCOUNT_PERCENTAGE)
+                            if historical_average is not None else None
+                        )
+                        below_market_threshold = lowest_price < buy_threshold_price
+                        below_average_threshold = (
+                            history_ready
+                            and average_threshold_price is not None
+                            and lowest_price <= average_threshold_price
+                        )
+
+                        if average_threshold_price is not None:
+                            print(
+                                f"Average calculation ({product_name}): historical average "
+                                f"${historical_average:.3f}, required discount "
+                                f"{AUTOBUY_AVERAGE_DISCOUNT_PERCENTAGE*100:.1f}% => "
+                                f"maximum buy price ${average_threshold_price:.3f}."
+                            )
+                        if not history_ready:
+                            print(
+                                f"Price history warm-up ({product_name}): {history_sample_count}/"
+                                f"{AUTOBUY_PRICE_HISTORY_MIN_SAMPLES} prior samples; purchase disabled."
+                            )
+
+                        if below_market_threshold and below_average_threshold:
+                            print(
+                                f"***> Both conditions met ({product_name})! Lowest ${lowest_price:.3f} "
+                                f"< market threshold ${buy_threshold_price:.3f} and <= average threshold "
+                                f"${average_threshold_price:.3f}."
+                            )
                             if self.driver is None:
                                 print("Initializing Selenium WebDriver in AutoBuyer.main_loop via driver_utils.initialize_driver()...")
                                 try:
@@ -493,7 +603,19 @@ class AutoBuyer:
                                 self._log_error_message(err_msg) # Log the failure
 
                         else:
-                            print(f"---> Condition not met ({product_name}). Lowest price ${lowest_price:.3f} >= threshold ${buy_threshold_price:.3f}")
+                            reasons = []
+                            if not below_market_threshold:
+                                reasons.append(
+                                    f"lowest ${lowest_price:.3f} is not below market threshold ${buy_threshold_price:.3f}"
+                                )
+                            if not history_ready:
+                                reasons.append("price history is still warming up")
+                            elif not below_average_threshold:
+                                reasons.append(
+                                    f"lowest ${lowest_price:.3f} is not at least "
+                                    f"{AUTOBUY_AVERAGE_DISCOUNT_PERCENTAGE*100:.1f}% below average"
+                                )
+                            print(f"---> Conditions not met ({product_name}): {'; '.join(reasons)}.")
 
                     elif 'lowest_order' in market_data:  # market_data is not None here
                         lowest_order = market_data['lowest_order']

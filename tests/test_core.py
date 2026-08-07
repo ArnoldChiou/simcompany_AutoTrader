@@ -41,6 +41,18 @@ class AutoBuyerTests(unittest.TestCase):
     def test_parse_price_with_thousands_separator(self):
         self.assertEqual(AutoBuyer._parse_price_text("$2,200.000"), 2200.0)
 
+    def test_historical_average_uses_product_samples(self):
+        buyer = AutoBuyer({}, {}, {}, None, None, None)
+        buyer._price_history = {
+            "Power": [
+                {"timestamp": "2030-01-01T00:00:00", "price": 10.0},
+                {"timestamp": "2030-01-01T01:00:00", "price": 14.0},
+            ]
+        }
+        average, sample_count = buyer._get_historical_average("Power")
+        self.assertEqual(average, 12.0)
+        self.assertEqual(sample_count, 2)
+
 
 class PowerPlantTests(unittest.TestCase):
     def test_finish_time_is_timezone_aware(self):
