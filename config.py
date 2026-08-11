@@ -12,7 +12,7 @@ DEFAULT_MAX_TOTAL_COST = float(os.getenv("DEFAULT_MAX_TOTAL_COST", "50000000"))
 CASH_API_URL = "https://www.simcompanies.com/api/v2/companies/me/cashflow/recent/"
 
 POWER_PLANT_PATHS = [
-    "/b/40253730/", "/b/39825683/", "/b/39888395/", "/b/39915579/",
+    "/b/40253730/", "/b/39825683/", "/b/39915579/",
     "/b/53860676/", "/b/39825679/", "/b/39693844/", "/b/39825691/",
     "/b/39825676/", "/b/39825686/", "/b/41178098/",
 ]

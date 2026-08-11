@@ -496,7 +496,13 @@ class PowerPlantProducer(BaseMonitor):
                     data = json.load(f)
                 # Convert ISO strings back to datetime objects
                 loaded_times = {}
-                for path, time_str in data.items():
+                ignored_paths = sorted(set(data) - set(self.target_paths))
+                if ignored_paths:
+                    self.logger.info(
+                        f"[{self.name}] Ignoring finish times for unconfigured plants: {ignored_paths}"
+                    )
+                for path in self.target_paths:
+                    time_str = data.get(path)
                     if time_str:
                         try:
                             loaded_times[path] = self._parse_finish_time(time_str)
