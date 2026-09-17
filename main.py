@@ -9,8 +9,12 @@ from production_monitor import (
     ForestNurseryMonitor,
     PowerPlantProducer,
     OilRigMonitor,
-    BatteryProducer
+    BatteryProducer,
+    BuildingConstructionMonitor,
 )
+from telegram_utils import send_telegram_notify
+from driver_utils import initialize_driver
+from retail_profit_advisor import RetailProfitAdvisor
 from config import (
     TARGET_PRODUCTS, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
     MARKET_HEADERS, POWER_PLANT_PATHS # Import MARKET_HEADERS
@@ -92,6 +96,38 @@ def run_battery_producer(logger):
     producer = BatteryProducer(battery_paths, logger=logger, user_data_dir=user_data_dir)
     producer.run()
 
+
+def run_building_construction_monitor(logger):
+    """Monitors every Landscape building for construction and production completion."""
+    user_data_dir = os.getenv("USER_DATA_DIR_construction_monitor")
+    monitor = BuildingConstructionMonitor(logger=logger, user_data_dir=user_data_dir)
+    monitor.run()
+
+
+def run_retail_profit_advisor(logger):
+    """Run a read-only 48-hour retail comparison for the configured building."""
+    user_data_dir = os.getenv("USER_DATA_DIR_retail_advisor") or os.getenv(
+        "USER_DATA_DIR_construction_monitor"
+    )
+    advisor = RetailProfitAdvisor(logger=logger)
+    driver = None
+    try:
+        driver = initialize_driver(user_data_dir=user_data_dir)
+        building_url = f"https://www.simcompanies.com{advisor.target_path}"
+        recommendations = advisor.analyse(driver, building_url)
+        report = advisor.telegram_text(recommendations, advisor.hours)
+        if not report:
+            print("沒有讀到可比較的零售產品；請確認該建築物閒置且 Chrome profile 已登入。")
+            return
+        print("\n" + report)
+        send_telegram_notify(report)
+    except Exception as error:
+        logger.error("Retail profit advisor failed: %s", error, exc_info=True)
+        print(f"零售利潤計算失敗：{error}")
+    finally:
+        if driver:
+            driver.quit()
+
 def run_init_all_profiles():
     import subprocess
     print("\n開始初始化所有 Chrome profiles ...")
@@ -114,6 +150,9 @@ if __name__ == "__main__":
                     ("Produce Power Plant", "4"),
                     ("Monitor All Oil Rigs", "5"),
                     ("Produce Batteries", "6"),
+                    ("Monitor All Construction & Product Completions (Telegram)", "7"),
+                    ("Compare Retail Profit (48h, Telegram)", "8"),
+                    ("Send Telegram Test", "telegram_test"),
                     ("Init all Chrome profiles", "init_profiles"),
                     ("Exit", "exit"),
                 ],
@@ -143,6 +182,14 @@ if __name__ == "__main__":
         elif mode == "6":
             logger = setup_logger("production_monitor.battery", "monitor_battery.log")
             run_battery_producer(logger)
+        elif mode == "7":
+            logger = setup_logger("production_monitor.construction", "monitor_construction.log")
+            run_building_construction_monitor(logger)
+        elif mode == "8":
+            logger = setup_logger("retail_profit_advisor", "retail_profit_advisor.log")
+            run_retail_profit_advisor(logger)
+        elif mode == "telegram_test":
+            send_telegram_notify("✅ SimCompanies Telegram 通知測試成功。")
         elif mode == "init_profiles":
             run_init_all_profiles()
         elif mode == "exit":

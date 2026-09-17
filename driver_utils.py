@@ -52,11 +52,13 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
         options.add_argument('--disable-dev-shm-usage')
         # options.add_argument('--remote-debugging-port=9222') # REMOVED: To avoid port collision
         options.add_argument('--disable-gpu') # Added for stability
-        options.add_argument('--start-maximized') # Added for stability
+        # Run automated monitors without opening a visible Chrome window.
+        # A fixed viewport is required because --start-maximized has no effect
+        # when Chrome runs in headless mode.
+        options.add_argument('--headless=new')
+        options.add_argument('--window-size=1920,1080')
         options.add_argument('--disable-extensions') # Added for stability
         options.add_experimental_option("excludeSwitches", ["enable-logging"])
-        # Ensure headless is not accidentally enabled if not intended, or explicitly enable if needed
-        # options.add_argument('--headless') # Uncomment if headless is desired
 
         # 新增: 支援直接傳 user_data_dir 參數
         effective_user_data_dir = user_data_dir
@@ -92,10 +94,10 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
                 options.add_argument('--disable-dev-shm-usage')
                 # options.add_argument('--remote-debugging-port=9222') # REMOVED
                 options.add_argument('--disable-gpu')
-                options.add_argument('--start-maximized')
+                options.add_argument('--headless=new')
+                options.add_argument('--window-size=1920,1080')
                 options.add_argument('--disable-extensions')
                 options.add_experimental_option("excludeSwitches", ["enable-logging"])
-                # options.add_argument('--headless') # Uncomment if headless is desired for fallback
 
                 chrome_version = get_installed_chrome_version()
                 if chrome_version:
@@ -119,10 +121,10 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
             options.add_argument('--disable-dev-shm-usage')
             # options.add_argument('--remote-debugging-port=9222') # REMOVED
             options.add_argument('--disable-gpu')
-            options.add_argument('--start-maximized')
+            options.add_argument('--headless=new')
+            options.add_argument('--window-size=1920,1080')
             options.add_argument('--disable-extensions')
             options.add_experimental_option("excludeSwitches", ["enable-logging"])
-            # options.add_argument('--headless') # Uncomment if headless is desired for default
 
             chrome_version = get_installed_chrome_version()
             if chrome_version:

@@ -1,4 +1,5 @@
 import os
+import sys
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service as ChromeService
 from webdriver_manager.chrome import ChromeDriverManager
@@ -12,7 +13,15 @@ PROFILE_KEYS = [
     "USER_DATA_DIR_forestnursery",
     "USER_DATA_DIR_powerplant",
     "USER_DATA_DIR_oiirig",
+    "USER_DATA_DIR_construction_monitor",
 ]
+
+if len(sys.argv) > 1:
+    requested_profile = sys.argv[1]
+    if requested_profile not in PROFILE_KEYS:
+        valid_profiles = ", ".join(PROFILE_KEYS)
+        raise SystemExit(f"Unknown profile key: {requested_profile}. Choose one of: {valid_profiles}")
+    PROFILE_KEYS = [requested_profile]
 
 LOGIN_URL = "https://www.simcompanies.com/signin/"
 

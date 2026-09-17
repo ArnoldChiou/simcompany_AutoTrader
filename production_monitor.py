@@ -24,7 +24,9 @@ from selenium.common.exceptions import (
 
 from driver_utils import initialize_driver
 from email_utils import send_email_notify
+from telegram_utils import send_telegram_notify
 from config import POWER_PLANT_PATHS
+from retail_profit_advisor import RetailProfitAdvisor
 
 # --- Logging Setup ---
 def setup_logger(name, log_filename):
@@ -49,6 +51,9 @@ def setup_logger(name, log_filename):
 BASE_URL = "https://www.simcompanies.com"
 DEFAULT_RETRY_DELAY = 60  # seconds
 LONG_RETRY_DELAY = 100 # seconds 
+LOGIN_CHECK_TIMEOUT = 20 # seconds
+ACTIVITY_PANEL_WAIT = 8 # seconds
+MISSING_CONFIRMATIONS_REQUIRED = 2
 CONSTRUCTION_CHECK_BUFFER = 60 # seconds
 PRODUCTION_CHECK_BUFFER = 60 # seconds
 REBUILD_DELAY = 60 # seconds
@@ -66,21 +71,62 @@ class BaseMonitor:
         self.driver = None
         self.logger = logger
         self.user_data_dir = user_data_dir
+        self._login_alert_sent = False
+
+    def _login_state(self):
+        """Return authenticated, login_required, or None while the SPA is loading."""
+        try:
+            login_elements = self.driver.find_elements(
+                By.XPATH,
+                "//form[contains(@action, '/login') or contains(@action, '/signin')] | "
+                "//a[contains(@href, '/signin') or contains(@href, '/login')] | "
+                "//button[contains(translate(normalize-space(.), 'LOGIN', 'login'), 'login') and @type='submit']"
+            )
+            if any(element.is_displayed() for element in login_elements):
+                return "login_required"
+
+            authenticated_elements = self.driver.find_elements(
+                By.XPATH,
+                "//a[contains(@href,'/landscape')] | //a[contains(@href,'/logout')]"
+            )
+            if any(element.is_displayed() for element in authenticated_elements):
+                return "authenticated"
+            return None
+        except Exception as e:
+            self.logger.warning(f"[{self.name}] Error checking login status: {e}")
+            return None
 
     def _is_logged_in(self):
         """Require a positive authenticated-page indicator."""
+        return self._login_state() == "authenticated"
+
+    def _wait_for_login_state(self):
         try:
-            login_btns = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/signin') or contains(@href, '/login')]")
-            if login_btns:
-                return False
-            authenticated_elements = self.driver.find_elements(
-                By.XPATH,
-                "//*[@id='js-animation-money'] | //a[contains(@href,'/landscape')] | //a[contains(@href,'/company')]"
+            WebDriverWait(self.driver, LOGIN_CHECK_TIMEOUT, poll_frequency=0.5).until(
+                lambda _driver: self._is_logged_in()
             )
-            return bool(authenticated_elements)
-        except Exception as e:
-            self.logger.warning(f"[{self.name}] Error checking login status: {e}")
-            return False
+            return "authenticated"
+        except TimeoutException:
+            return self._login_state() or "unknown"
+
+    def _notify_login_problem(self, state):
+        if self._login_alert_sent:
+            return
+        current_url = ""
+        try:
+            current_url = self.driver.current_url
+        except Exception:
+            pass
+        reason = "登入已失效" if state == "login_required" else "頁面載入逾時，無法確認登入狀態"
+        message = (
+            "⚠️ SimCompanies 監控暫停！\n"
+            f"監控：{self.name}\n"
+            f"原因：{reason}\n"
+            f"網址：{current_url or self.base_url}\n"
+            "請開啟 SimCompanies 確認登入；程式會自動重試。"
+        )
+        if send_telegram_notify(message):
+            self._login_alert_sent = True
 
     def _initialize_driver(self):
         self.logger.info(f"[{self.name}] Initializing WebDriver with profile: {self.user_data_dir or 'default'}...")
@@ -92,17 +138,19 @@ class BaseMonitor:
                 self.logger.info(f"[{self.name}] Navigating to {self.base_url} for initial login check.")
                 try:
                     self.driver.get(self.base_url)
-                    time.sleep(2)
-                    if not self._is_logged_in():
-                        input(
-                            f"[{self.name}] Profile: '{self.user_data_dir or 'Default'}'. "
-                            f"Browser window should be open. Please ensure you are logged in at {self.base_url}. "
-                            "Press Enter in this console to continue..."
-                        )
-                        self.logger.info(f"[{self.name}] User confirmed login check. Proceeding.")
-                    else:
+                    login_state = self._wait_for_login_state()
+                    if login_state == "authenticated":
+                        self._login_alert_sent = False
                         self.logger.info(f"[{self.name}] Detected already logged in, proceeding automatically.")
-                    return True
+                        return True
+
+                    self.logger.warning(
+                        f"[{self.name}] Login check did not authenticate (state: {login_state}). "
+                        f"Retrying in {LONG_RETRY_DELAY} seconds."
+                    )
+                    self._notify_login_problem(login_state)
+                    self._quit_driver()
+                    return False
                 except WebDriverException as e_nav:
                     self.logger.error(f"[{self.name}] Error navigating to {self.base_url} for login check: {e_nav}")
                     if self.driver:
@@ -478,6 +526,14 @@ class ForestNurseryMonitor(BaseMonitor):
 # --- Power Plant Producer ---
 class PowerPlantProducer(BaseMonitor):
     """Manages Power Plant production cycles."""
+    # SimCompanies now renders this label in different elements depending on
+    # the activity (for example, robot installation and building upgrades).
+    # Do not tie the lookup to a <p> tag or to direct text nodes.
+    FINISH_TIME_XPATH = (
+        "//*[contains(translate(normalize-space(.), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), 'finishes at')]"
+    )
+
     def __init__(self, target_paths, logger=None, user_data_dir=None):
         super().__init__("PowerPlant", logger=logger, user_data_dir=user_data_dir)
         self.target_paths = target_paths
@@ -547,6 +603,38 @@ class PowerPlantProducer(BaseMonitor):
             self.logger.error(f"[{self.name}] Error saving finish times to {self.finish_times_file_path}: {e}")
         except Exception as e:
             self.logger.error(f"[{self.name}] Unexpected error saving finish times: {e}", exc_info=True)
+
+    def _find_visible_finish_time(self):
+        """Return ``(element, text, datetime)`` for a visible finish timer.
+
+        The site may nest the label and timestamp in spans or cards, so the
+        smallest visible element with a *parseable* ``Finishes at`` value is
+        selected.  This accepts production, robot-installation, and upgrade
+        timers without mistaking an unrelated parent container for a timer.
+        """
+        candidates = []
+        for element in self.driver.find_elements(By.XPATH, self.FINISH_TIME_XPATH):
+            try:
+                if not element.is_displayed():
+                    continue
+                text = " ".join(line.strip() for line in element.text.splitlines() if line.strip())
+                match = re.search(r"\bfinishes\s+at\s*:?[\s]*(.+)", text, flags=re.IGNORECASE)
+                if not match:
+                    continue
+                finish_dt = self._parse_finish_time(match.group(1).strip())
+                candidates.append((len(text), element, text, finish_dt))
+            except (ValueError, TypeError, OverflowError, StaleElementReferenceException):
+                continue
+
+        if not candidates:
+            return None
+        _, element, text, finish_dt = min(candidates, key=lambda candidate: candidate[0])
+        return element, text, finish_dt
+
+    def _find_visible_finish_time_element(self):
+        """Return only the timer element for Selenium expected conditions."""
+        finish_time = self._find_visible_finish_time()
+        return finish_time[0] if finish_time else False
 
     @staticmethod
     def _parse_finish_time(value):
@@ -679,15 +767,11 @@ class PowerPlantProducer(BaseMonitor):
         max_retries = 3
         for attempt in range(1, max_retries + 1):
             try:
-                finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-                if finish_time_elements and finish_time_elements[0].is_displayed():
-                    finish_time_str = finish_time_elements[0].text.strip()
+                existing_finish_time = self._find_visible_finish_time()
+                if existing_finish_time:
+                    _, finish_time_str, finish_dt = existing_finish_time
                     self.logger.info(f"[{self.name}] {path} is ALREADY PRODUCING. Finish time: {finish_time_str}")
-                    try:
-                        finish_dt = self._parse_finish_time(finish_time_str.replace('Finishes at', '').strip())
-                        self.plant_finish_times[path] = finish_dt
-                    except Exception:
-                        self.plant_finish_times[path] = None
+                    self.plant_finish_times[path] = finish_dt
                     return False
                 self.logger.info(f"[{self.name}] {path} is not producing, attempting to start 24h production... (attempt {attempt}/{max_retries})")
                 WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable((By.XPATH, "//button[normalize-space(.)='24h']"))).click()
@@ -699,22 +783,17 @@ class PowerPlantProducer(BaseMonitor):
                 confirmation_element = WebDriverWait(self.driver, 15).until(
                     EC.any_of(
                         EC.presence_of_element_located((By.XPATH, "//button[normalize-space(.)='Cancel Production' and contains(@class, 'btn-secondary')]")),
-                        EC.presence_of_element_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-                        )
+                        lambda _driver: self._find_visible_finish_time_element()
                     )
                 )
                 tag_name = confirmation_element.tag_name
                 text_preview = confirmation_element.text.strip()[:30] if confirmation_element.text else ""
                 self.logger.info(f"[{self.name}] {path} Production successfully STARTED or CONFIRMED by UI element: <{tag_name}>{text_preview}...")
                 time.sleep(random.uniform(0.3, 0.7))
-                new_finish_time_elements = self.driver.find_elements(By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-                if new_finish_time_elements and new_finish_time_elements[0].is_displayed():
-                    new_finish_time_str = new_finish_time_elements[0].text.strip()
-                    try:
-                        finish_dt = self._parse_finish_time(new_finish_time_str.replace('Finishes at', '').strip())
-                        self.plant_finish_times[path] = finish_dt
-                    except Exception:
-                        self.plant_finish_times[path] = None
+                new_finish_time = self._find_visible_finish_time()
+                if new_finish_time:
+                    _, new_finish_time_str, finish_dt = new_finish_time
+                    self.plant_finish_times[path] = finish_dt
                     self.logger.info(f"[{self.name}] {path} New production finish time: {new_finish_time_str}")
                 else:
                     self.logger.warning(f"[{self.name}] {path} Production confirmed, but 'Finishes at' text not immediately found/updated. Will rely on next cycle if needed.")
@@ -730,11 +809,9 @@ class PowerPlantProducer(BaseMonitor):
                         pass
                     continue
                 else:
-                    from email_utils import send_email_notify
-                    subject = f"[SimCompany PowerPlant] 連續{max_retries}次啟動生產失敗通知 ({path})"
-                    body = f"PowerPlant {path} 連續{max_retries}次點擊生產按鈕皆失敗，請手動檢查。\nURL: {current_building_url}"
-                    send_email_notify(subject, body)
-                    self.logger.error(f"[{self.name}] {path} Failed to start production after {max_retries} attempts. Notification email sent.")
+                    # Keep the failure visible in the log, but do not email on
+                    # repeated retries (for example, while a plant is upgrading).
+                    self.logger.error(f"[{self.name}] {path} Failed to start production after {max_retries} attempts. Email notification disabled.")
                     self.plant_finish_times[path] = None
                     return False
             except Exception as e:
@@ -745,19 +822,15 @@ class PowerPlantProducer(BaseMonitor):
     def _get_existing_finish_time(self, path):
         """Gets existing finish time and updates self.plant_finish_times."""
         try:
-            finish_time_elements = WebDriverWait(self.driver, 7).until(
-                EC.presence_of_all_elements_located((By.XPATH, "//p[starts-with(normalize-space(text()), 'Finishes at')]")
-            ))
-            if finish_time_elements and finish_time_elements[0].is_displayed():
-                finish_time_str = finish_time_elements[0].text.strip()
+            existing_finish_time = WebDriverWait(self.driver, 7).until(
+                lambda _driver: self._find_visible_finish_time()
+            )
+            if existing_finish_time:
+                _, finish_time_str, finish_dt = existing_finish_time
                 self.logger.info(f"[{self.name}] {path} Found existing completion time: {finish_time_str}")
-                try:
-                    finish_dt = self._parse_finish_time(finish_time_str.replace('Finishes at', '').strip())
-                    self.plant_finish_times[path] = finish_dt
-                except Exception:
-                    self.plant_finish_times[path] = None
+                self.plant_finish_times[path] = finish_dt
                 return True
-            self.logger.info(f"[{self.name}] {path} 'Finishes at' element list empty or not displayed. Assuming no active production time visible.")
+            self.logger.info(f"[{self.name}] {path} No visible, parseable 'Finishes at' time. Assuming no active production time visible.")
             self.plant_finish_times[path] = None
             return False
         except TimeoutException:
@@ -1132,6 +1205,429 @@ class OilRigMonitor(BaseMonitor):
                 print(f"[{self.name}] Screenshot saved to: {path}")
         except Exception as e:
             print(f"[{self.name}] Failed to save screenshot: {e}")
+
+# --- All-building activity monitor ---
+class BuildingConstructionMonitor(BaseMonitor):
+    """Notifies Telegram when construction or product production completes."""
+
+    def __init__(self, logger=None, user_data_dir=None, state_file_path=None, poll_seconds=None):
+        super().__init__("BuildingActivity", logger=logger, user_data_dir=user_data_dir)
+        self.landscape_url = f"{self.base_url}/landscape/"
+        self.state_file_path = state_file_path or os.path.join("record", "building_activity_state.json")
+        self.idle_recheck_seconds = self._get_idle_recheck_seconds(poll_seconds)
+        self.retail_profit_advisor = RetailProfitAdvisor(logger=self.logger)
+        self.ignored_products = {
+            product.strip().casefold()
+            for product in os.getenv("TELEGRAM_IGNORED_PRODUCTS", "POWER").split(",")
+            if product.strip()
+        }
+        self.state = self._load_state()
+
+    @staticmethod
+    def _get_idle_recheck_seconds(value):
+        try:
+            seconds = int(value if value is not None else os.getenv("ACTIVITY_IDLE_RECHECK_SECONDS", "3600"))
+            return max(60, seconds)
+        except (TypeError, ValueError):
+            return 300
+
+    def _load_state(self):
+        default_state = {"initialized": False, "constructions": {}, "productions": {}}
+        try:
+            if not os.path.exists(self.state_file_path):
+                return default_state
+            with open(self.state_file_path, "r", encoding="utf-8") as state_file:
+                state = json.load(state_file)
+            if not isinstance(state.get("constructions"), dict) or not isinstance(state.get("productions"), dict):
+                return default_state
+            return {
+                "initialized": bool(state.get("initialized")),
+                "constructions": state["constructions"],
+                "productions": state["productions"],
+            }
+        except (OSError, json.JSONDecodeError) as error:
+            self.logger.warning(f"[{self.name}] Could not load activity state: {error}")
+            return default_state
+
+    def _save_state(self):
+        try:
+            os.makedirs(os.path.dirname(self.state_file_path) or ".", exist_ok=True)
+            with open(self.state_file_path, "w", encoding="utf-8") as state_file:
+                json.dump(self.state, state_file, ensure_ascii=False, indent=2)
+        except OSError as error:
+            self.logger.error(f"[{self.name}] Could not save activity state: {error}")
+
+    def run(self):
+        self.logger.info(f"[{self.name}] Starting all-building construction and production monitor.")
+        while True:
+            wait_seconds = self._process_once() or LONG_RETRY_DELAY
+            self.logger.info(f"[{self.name}] Next Landscape scan in {wait_seconds:.0f} seconds.")
+            try:
+                time.sleep(wait_seconds)
+            except KeyboardInterrupt:
+                self.logger.info(f"[{self.name}] Monitoring interrupted by user.")
+                break
+
+    def _process_once(self):
+        if not self._initialize_driver():
+            return LONG_RETRY_DELAY
+        try:
+            building_paths = self._get_landscape_building_paths()
+            if building_paths is None:
+                return LONG_RETRY_DELAY
+            inspected = {}
+            for path in building_paths:
+                result = self._inspect_building(path)
+                if result is not None:
+                    inspected[path] = result
+            self._update_state_and_notify(inspected, active_paths=building_paths)
+            return self._next_wait_seconds()
+        except Exception as error:
+            self.logger.error(f"[{self.name}] Landscape scan failed: {error}", exc_info=True)
+            return LONG_RETRY_DELAY
+        finally:
+            self._quit_driver()
+
+    def _get_landscape_building_paths(self):
+        landscape_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '/landscape')]")
+        if landscape_links:
+            landscape_link = next((link for link in landscape_links if link.is_displayed()), landscape_links[0])
+            resolved_url = landscape_link.get_attribute("href") or self.landscape_url
+            self.logger.info(f"[{self.name}] Opening Landscape through authenticated navigation: {resolved_url}")
+            self.driver.execute_script("arguments[0].click();", landscape_link)
+        else:
+            self.logger.info(f"[{self.name}] Landscape navigation link not found; opening {self.landscape_url} directly.")
+            self.driver.get(self.landscape_url)
+        WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        if self._check_login_required(self.landscape_url):
+            return None
+        building_xpath = "//*[contains(@href, '/b/') or contains(@data-href, '/b/') or @data-building-id]"
+        try:
+            building_elements = WebDriverWait(self.driver, 20, poll_frequency=0.5).until(
+                lambda driver: driver.find_elements(By.XPATH, building_xpath)
+            )
+        except TimeoutException:
+            current_url = self.driver.current_url
+            page_title = self.driver.title
+            self.logger.warning(
+                f"[{self.name}] Landscape building list did not load within 20 seconds; "
+                f"preserving the previous state and retrying (URL: {current_url}, title: {page_title!r})."
+            )
+            screenshot_path = os.path.join(
+                "record", f"building_activity_landscape_timeout_{datetime.datetime.now():%Y%m%d_%H%M%S}.png"
+            )
+            try:
+                self.driver.save_screenshot(screenshot_path)
+                self.logger.info(f"[{self.name}] Landscape timeout screenshot saved to {screenshot_path}.")
+            except Exception as screenshot_error:
+                self.logger.warning(f"[{self.name}] Could not save Landscape timeout screenshot: {screenshot_error}")
+            return None
+
+        paths = set()
+        for element in building_elements:
+            target = element.get_attribute("href") or element.get_attribute("data-href") or ""
+            match = re.search(r"/b/(\d+)", target)
+            if not match:
+                building_id = element.get_attribute("data-building-id")
+                match = re.fullmatch(r"\d+", building_id or "")
+                if match:
+                    paths.add(f"/b/{building_id}/")
+                continue
+            paths.add(f"/b/{match.group(1)}/")
+        self.logger.info(f"[{self.name}] Found {len(paths)} buildings on Landscape.")
+        return sorted(paths)
+
+    def _inspect_building(self, path):
+        """Read construction and every product-production timer on one page."""
+        building_url = self.base_url + path
+        try:
+            self.driver.get(building_url)
+            WebDriverWait(self.driver, 20).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            # SimCompanies renders the production panels after the document body
+            # appears. Waiting for document readiness prevents an early scan from
+            # treating a still-loading building as idle.
+            WebDriverWait(self.driver, 10).until(
+                lambda driver: driver.execute_script("return document.readyState") == "complete"
+            )
+            time.sleep(1)
+            if "/signin" in self.driver.current_url or "/login" in self.driver.current_url:
+                self.logger.warning(f"[{self.name}] Login required while inspecting {building_url}.")
+                return None
+            headings = self.driver.find_elements(By.TAG_NAME, "h1")
+            name = headings[0].text.strip() if headings and headings[0].text.strip() else path
+            finish_xpath = "//p[contains(normalize-space(.), 'Finishes at')]"
+            finish_elements = self.driver.find_elements(By.XPATH, finish_xpath)
+            was_previously_active = (
+                path in self.state["constructions"] or path in self.state["productions"]
+            )
+            if not finish_elements and was_previously_active:
+                try:
+                    finish_elements = WebDriverWait(
+                        self.driver, ACTIVITY_PANEL_WAIT, poll_frequency=0.5
+                    ).until(lambda driver: driver.find_elements(By.XPATH, finish_xpath))
+                except TimeoutException:
+                    self.logger.info(
+                        f"[{self.name}] Previously tracked activity is not visible on {path} "
+                        f"after waiting {ACTIVITY_PANEL_WAIT} seconds; completion will require confirmation."
+                    )
+            construction = None
+            products = {}
+            product_names = {}
+            for index, finish_element in enumerate(finish_elements, start=1):
+                finish_at = finish_element.text.replace("Finishes at", "").strip()
+                preceding_headings = finish_element.find_elements(By.XPATH, "preceding::h3[1]")
+                section_name = preceding_headings[0].text.strip() if preceding_headings else ""
+                activity_type, activity_name = self._normalize_activity_heading(section_name)
+                if activity_type == "construction":
+                    construction = {"name": name, "url": building_url, "finish_at": finish_at}
+                    continue
+                display_name = activity_name or f"Product {index}"
+                if self._is_ignored_product(display_name):
+                    continue
+                product_names[display_name] = product_names.get(display_name, 0) + 1
+                product_key = f"{display_name}#{product_names[display_name]}"
+                products[product_key] = {"name": display_name, "finish_at": finish_at}
+            products = self._dedupe_products(products)
+            if construction:
+                self.logger.info(f"[{self.name}] {name} ({path}) construction finishes at {construction['finish_at'] or 'unknown'}.")
+            for product in products.values():
+                self.logger.info(f"[{self.name}] {name} ({path}) producing {product['name']} until {product['finish_at'] or 'unknown'}.")
+            return {"name": name, "url": building_url, "construction": construction, "products": products}
+        except Exception as error:
+            self.logger.warning(f"[{self.name}] Could not inspect {building_url}: {error}")
+            return None
+
+    @staticmethod
+    def _parse_time(value):
+        try:
+            return parser.parse(value) if value else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+
+    def _is_due(self, finish_at):
+        finish_dt = self._parse_time(finish_at)
+        if not finish_dt:
+            return False
+        now = datetime.datetime.now(finish_dt.tzinfo) if finish_dt.tzinfo else datetime.datetime.now()
+        return finish_dt <= now
+
+    def _is_later_time(self, old_time, new_time):
+        old_dt, new_dt = self._parse_time(old_time), self._parse_time(new_time)
+        return bool(old_dt and new_dt and new_dt > old_dt)
+
+    @staticmethod
+    def _normalize_activity_heading(value):
+        """Return the activity type and the useful part of a SimCompanies heading."""
+        lines = [line.strip() for line in (value or "").splitlines() if line.strip()]
+        if not lines:
+            return None, ""
+        activity_type = lines[0].casefold()
+        if activity_type in {"production", "selling", "construction"}:
+            return activity_type, " ".join(lines[1:]).strip()
+        return None, " ".join(lines)
+
+    @classmethod
+    def _timer_identity(cls, finish_at):
+        parsed = cls._parse_time(finish_at)
+        if parsed:
+            return parsed.isoformat()
+        return (finish_at or "").strip().casefold()
+
+    @classmethod
+    def _normalized_product(cls, product):
+        normalized = dict(product)
+        _activity_type, name = cls._normalize_activity_heading(product.get("name"))
+        if name:
+            normalized["name"] = name
+        return normalized
+
+    @classmethod
+    def _product_name_score(cls, product):
+        """Prefer a quality-specific label such as PROCESSORS Q2 over Processors."""
+        name = cls._normalized_product(product).get("name", "")
+        return (
+            1 if re.search(r"\bQ\d+\b", name, flags=re.IGNORECASE) else 0,
+            len(name),
+        )
+
+    @classmethod
+    def _dedupe_products(cls, products):
+        """Collapse alternate DOM labels that point at the same production timer."""
+        selected = {}
+        order = []
+        for product_key, raw_product in products.items():
+            product = cls._normalized_product(raw_product)
+            timer_id = cls._timer_identity(product.get("finish_at"))
+            if timer_id not in selected:
+                selected[timer_id] = (product_key, product)
+                order.append(timer_id)
+                continue
+            old_key, old_product = selected[timer_id]
+            if cls._product_name_score(product) > cls._product_name_score(old_product):
+                selected[timer_id] = (product_key, product)
+        return {selected[timer_id][0]: selected[timer_id][1] for timer_id in order}
+
+    def _is_ignored_product(self, product_name):
+        normalized_name = (product_name or "").strip().casefold()
+        return any(
+            normalized_name == ignored or normalized_name.startswith(f"{ignored} ")
+            for ignored in self.ignored_products
+        )
+
+    def _send_construction_notification(self, building):
+        return send_telegram_notify(
+            "🏗️ SimCompanies 建築完成！\n"
+            f"建築：{building.get('name', 'Unknown')}\n"
+            f"網址：{building.get('url', '')}"
+        )
+
+    def _send_production_notification(self, building, product, include_retail_advice=False):
+        message = (
+            "✅ SimCompanies 產品生產完成！\n"
+            f"建築：{building.get('name', 'Unknown')}\n"
+            f"產品：{product.get('name', 'Unknown')}\n"
+            f"網址：{building.get('url', '')}"
+        )
+        # The target retail building is now idle.  Calculate its 48-hour
+        # choices before the existing completion notification is delivered.
+        if include_retail_advice and self.driver and self.retail_profit_advisor.is_target(building.get("url", "")):
+            recommendations = self.retail_profit_advisor.analyse(self.driver, building.get("url", ""))
+            advice = self.retail_profit_advisor.telegram_text(
+                recommendations, self.retail_profit_advisor.hours
+            )
+            if advice:
+                message += f"\n\n資料時間：{self.retail_profit_advisor.checked_at}\n" + advice
+            if self.retail_profit_advisor.errors:
+                message += '\n未完成比較：' + '；'.join(self.retail_profit_advisor.errors)
+        return send_telegram_notify(message)
+
+    def _update_state_and_notify(self, inspected, active_paths=None):
+        old_constructions = self.state["constructions"]
+        old_productions = self.state["productions"]
+        active_paths = set(inspected if active_paths is None else active_paths)
+        # Preserve state when an active building temporarily fails inspection,
+        # but discard records for buildings absent from a successfully loaded
+        # Landscape so past timers cannot force a scan every minute forever.
+        next_constructions = {
+            path: value for path, value in old_constructions.items()
+            if path not in inspected and path in active_paths
+        }
+        next_productions = {
+            path: value for path, value in old_productions.items()
+            if path not in inspected and path in active_paths
+        }
+
+        for path, current in inspected.items():
+            old_construction = old_constructions.get(path)
+            if self.state["initialized"] and old_construction and not current["construction"]:
+                if not self._is_due(old_construction.get("finish_at")):
+                    next_constructions[path] = old_construction
+                else:
+                    missing_count = int(old_construction.get("_missing_confirmations", 0)) + 1
+                    if missing_count < MISSING_CONFIRMATIONS_REQUIRED:
+                        pending_construction = dict(old_construction)
+                        pending_construction["_missing_confirmations"] = missing_count
+                        next_constructions[path] = pending_construction
+                        self.logger.info(
+                            f"[{self.name}] Construction timer missing for {path}; "
+                            f"confirmation {missing_count}/{MISSING_CONFIRMATIONS_REQUIRED}."
+                        )
+                    elif not self._send_construction_notification(old_construction):
+                        next_constructions[path] = old_construction
+            if current["construction"]:
+                next_constructions[path] = current["construction"]
+
+            # Construction cancels production; do not report that as a completed product.
+            if current["construction"]:
+                continue
+
+            current_products = self._dedupe_products(current["products"])
+            old_building = old_productions.get(path)
+            if self.state["initialized"] and old_building:
+                old_products = self._dedupe_products(old_building.get("products", {}))
+                for product_key, old_product in old_products.items():
+                    if self._is_ignored_product(old_product.get("name")):
+                        continue
+                    current_product = current_products.get(product_key)
+                    if current_product is None:
+                        # The site can expose one timer under both a broad heading
+                        # ("PRODUCTION / Processors") and a quality heading
+                        # ("PROCESSORS Q2").  A heading change must not create a
+                        # second activity or make the old one look completed.
+                        old_timer_id = self._timer_identity(old_product.get("finish_at"))
+                        alias_key = next(
+                            (
+                                key for key, product in current_products.items()
+                                if self._timer_identity(product.get("finish_at")) == old_timer_id
+                            ),
+                            None,
+                        )
+                        if alias_key is not None:
+                            current_product = current_products.pop(alias_key)
+                            preferred_product = max(
+                                (old_product, current_product), key=self._product_name_score
+                            )
+                            stable_product = self._normalized_product(preferred_product)
+                            stable_product["finish_at"] = current_product.get("finish_at")
+                            stable_product.pop("_missing_confirmations", None)
+                            current_products[product_key] = stable_product
+                    completed = False
+                    if current_product is None:
+                        if not self._is_due(old_product.get("finish_at")):
+                            # A client-rendered panel can disappear temporarily.
+                            # Keep its known timer until it is actually due.
+                            current_products[product_key] = old_product
+                        else:
+                            missing_count = int(old_product.get("_missing_confirmations", 0)) + 1
+                            if missing_count < MISSING_CONFIRMATIONS_REQUIRED:
+                                pending_product = dict(old_product)
+                                pending_product["_missing_confirmations"] = missing_count
+                                current_products[product_key] = pending_product
+                                self.logger.info(
+                                    f"[{self.name}] Product timer {product_key} missing for {path}; "
+                                    f"confirmation {missing_count}/{MISSING_CONFIRMATIONS_REQUIRED}."
+                                )
+                            else:
+                                completed = True
+                    restarted = current_product and self._is_later_time(
+                        old_product.get("finish_at"), current_product.get("finish_at")
+                    )
+                    if completed or restarted:
+                        if not self._send_production_notification(
+                            old_building, old_product,
+                            include_retail_advice=bool(completed and not current['products']),
+                        ):
+                            # Preserve the old timer so a failed Telegram request is retried.
+                            current_products[product_key] = old_product
+
+            if current_products:
+                next_productions[path] = {
+                    "name": current["name"], "url": current["url"], "products": current_products
+                }
+
+        self.state = {
+            "initialized": True,
+            "constructions": next_constructions,
+            "productions": next_productions,
+        }
+        self._save_state()
+
+    def _next_wait_seconds(self):
+        waits = []
+        for construction in self.state["constructions"].values():
+            waits.append(construction.get("finish_at"))
+        for building in self.state["productions"].values():
+            waits.extend(product.get("finish_at") for product in building.get("products", {}).values())
+        remaining = []
+        for finish_at in waits:
+            finish_dt = self._parse_time(finish_at)
+            if finish_dt:
+                now = datetime.datetime.now(finish_dt.tzinfo) if finish_dt.tzinfo else datetime.datetime.now()
+                remaining.append((finish_dt - now).total_seconds() + CONSTRUCTION_CHECK_BUFFER)
+        # Once timers are known, there is no need to poll repeatedly. Revisit
+        # Landscape just after the earliest recorded completion instead.
+        return self.idle_recheck_seconds if not remaining else max(60, max(0, min(remaining)))
+
 
 # --- Electronics Factory (Batteries) Producer ---
 class BatteryProducer(BaseMonitor):

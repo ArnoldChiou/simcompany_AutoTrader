@@ -11,6 +11,8 @@ This project offers a suite of tools designed to automate various tasks within t
     *   **Forest Nursery**: Monitors production, automatically initiates "Nurture" when ready, handles low-resource situations by starting "Cut down," and awaits construction/production completion.
     *   **Power Plant**: Batch-starts 24-hour production cycles across multiple power plants and monitors their completion.
     *   **Oil Rig**: Monitors construction status, checks resource abundance, and automatically triggers "Rebuild" if abundance drops below 95%.
+*   **Telegram Activity Notifications**: Scans every building on your Landscape and sends a Telegram message when construction or product production completes.
+*   **Retail Profit Advisor**: When `/b/54696865/` finishes selling and becomes idle, appends a 48-hour product ranking to its Telegram completion notice. It subtracts the quantity-weighted cost of buying each product from the Exchange; it never submits a buy or production order.
 *   **Email Notifications**: Sends email alerts via Gmail for critical events like required logins, completed constructions, or monitoring errors.
 *   **Selenium Automation**: Employs Selenium with `webdriver-manager` to control a Chrome browser. It supports using a specific Chrome user profile to maintain login sessions.
 *   **Logging**: Records successful trades and detailed monitoring activities to text files for review.
@@ -64,6 +66,20 @@ This project offers a suite of tools designed to automate various tasks within t
     # Email settings for notifications (optional but recommended)
     MAIL_TO=your_recipient_email@example.com
     MAIL_FROM=your_gmail_address@gmail.com
+
+    # Telegram settings for the all-building construction monitor
+    # Create a bot with @BotFather, then start a chat with that bot.
+    TELEGRAM_BOT_TOKEN=123456789:your_bot_token
+    TELEGRAM_CHAT_ID=your_telegram_chat_id
+    USER_DATA_DIR_construction_monitor=C:\Users\YourUser\AppData\Local\Google\Chrome\User Data
+    # Active timers are checked at their recorded completion time; this applies only when idle.
+    ACTIVITY_IDLE_RECHECK_SECONDS=3600
+    TELEGRAM_IGNORED_PRODUCTS=POWER
+    # Optional separate profile; otherwise the construction-monitor profile is used.
+    USER_DATA_DIR_retail_advisor=C:\Users\YourUser\AppData\Local\Google\Chrome\User Data
+    RETAIL_ADVISOR_BUILDING_PATH=/b/54696865/
+    RETAIL_ADVISOR_HOURS=48
+    RETAIL_ADVISOR_REALM=0
     ```
 5.  **Set up Google Cloud & Gmail API:**
     *   Navigate to the [Google Cloud Console](https://console.cloud.google.com/).
@@ -79,6 +95,8 @@ This project offers a suite of tools designed to automate various tasks within t
 
 *   **Products & Thresholds:** Modify `PRODUCT_CONFIGS` and `BUY_THRESHOLD_PERCENTAGE` in `config.py` to define which products to monitor and the conditions for purchasing.
 *   **Building Paths:** To change which specific buildings are monitored (e.g., Forest Nurseries, Power Plants), you will need to edit the path lists directly in `main.py` within the respective functions (e.g., `run_forest_nursery_monitor`, `run_power_plant_producer`).
+*   **All-building Telegram monitor:** Select **Monitor All Construction & Product Completions (Telegram)**. It opens your Landscape, finds every `/b/.../` building, and remembers active construction and product timers in `record/building_activity_state.json`. The first scan only establishes a baseline; later scans notify when either activity completes. Use **Send Telegram Test** to verify the token and chat ID first.
+*   **Retail-profit advisor:** The target defaults to `/b/54696865/`. When its tracked sale completes and the building becomes idle, the Telegram message lists its retail products ordered by approximately 48-hour net profit. Product IDs and names come directly from the page. Net profit is `(retail revenue per unit − wages per unit − Exchange VWAP) × quantity`. The game's **Retailing breakdown** supplies revenue, wages, and COGS: any warehouse book cost already deducted from the headline profit is added back before replacing it with market cost. Exchange sourcing accepts the preview quality or higher; the preview's sales speed is retained without assuming extra capacity for higher-quality purchases. The program fills `48hr` and Average price, uses the quantity arrows to reveal the integer quantity, and reads the Help breakdown. It does not submit orders. Run the same calculation any time from menu option **Compare Retail Profit (48h, Telegram)**, including while the current sale is still running.
 
 ## Usage
 
@@ -92,6 +110,8 @@ This project offers a suite of tools designed to automate various tasks within t
     *   **Monitor Forest Nursery**: Initiates the Forest Nursery monitoring and automation task.
     *   **Produce Power Plant**: Begins the Power Plant batch production task.
     *   **Monitor All Oil Rigs**: Starts the Oil Rig monitoring and rebuild task.
+    *   **Monitor All Construction & Product Completions (Telegram)**: Monitors every building shown on Landscape and sends a Telegram alert after construction or product production completes.
+    *   **Compare Retail Profit (48h, Telegram)**: Runs the same read-only comparison immediately and sends the ranking to Telegram.
     *   **Exit**: Closes the application.
 
 ## Logs
