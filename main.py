@@ -15,6 +15,7 @@ from production_monitor import (
 from telegram_utils import send_telegram_notify
 from driver_utils import initialize_driver
 from retail_profit_advisor import RetailProfitAdvisor
+from company_vwap_updater import update_company_description
 from config import (
     TARGET_PRODUCTS, MAX_BUY_QUANTITY, # Import TARGET_PRODUCTS
     MARKET_HEADERS, POWER_PLANT_PATHS # Import MARKET_HEADERS
@@ -128,6 +129,23 @@ def run_retail_profit_advisor(logger):
         if driver:
             driver.quit()
 
+
+def run_company_vwap_update():
+    """Update the public description from the signed-in warehouse and VWAPs."""
+    logger = setup_logger("company_vwap_updater", "company_vwap_updater.log")
+    try:
+        result = update_company_description(apply=True, logger=logger)
+        print(
+            f"\n公司簡介更新完成：{result.item_count} 個商品／品質組合。"
+            + (f"備份：{result.backup_path}" if result.backup_path else "內容已是最新，未重複寫入。")
+        )
+        print(result.updated_description)
+        return result
+    except Exception as error:
+        logger.error("Company VWAP description update failed: %s", error, exc_info=True)
+        print(f"更新公司簡介失敗：{error}")
+        return None
+
 def run_init_all_profiles():
     import subprocess
     print("\n開始初始化所有 Chrome profiles ...")
@@ -152,6 +170,7 @@ if __name__ == "__main__":
                     ("Produce Batteries", "6"),
                     ("Monitor All Construction & Product Completions (Telegram)", "7"),
                     ("Compare Retail Profit (48h, Telegram)", "8"),
+                    ("Update company description from warehouse VWAPs", "9"),
                     ("Send Telegram Test", "telegram_test"),
                     ("Init all Chrome profiles", "init_profiles"),
                     ("Exit", "exit"),
@@ -188,6 +207,8 @@ if __name__ == "__main__":
         elif mode == "8":
             logger = setup_logger("retail_profit_advisor", "retail_profit_advisor.log")
             run_retail_profit_advisor(logger)
+        elif mode == "9":
+            run_company_vwap_update()
         elif mode == "telegram_test":
             send_telegram_notify("✅ SimCompanies Telegram 通知測試成功。")
         elif mode == "init_profiles":

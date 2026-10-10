@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from selenium.common.exceptions import TimeoutException
 
 from AutoBuyer import AutoBuyer
-from market_utils import get_market_data
+from market_utils import get_current_money, get_market_data
 from production_monitor import BaseMonitor, BuildingConstructionMonitor, PowerPlantProducer
 from retail_profit_advisor import (
     RetailProfitAdvisor,
@@ -36,6 +36,34 @@ class MarketDataTests(unittest.TestCase):
 
         self.assertEqual(result["lowest_order"]["id"], 1)
         self.assertEqual(result["second_lowest_price"], 12)
+
+    def test_current_money_uses_the_new_money_balance_element(self):
+        money_element = Mock()
+        money_element.is_displayed.return_value = True
+        money_element.text = "$8,652,116"
+        driver = Mock()
+
+        def find_element(by, selector):
+            if selector == "money-balance":
+                return money_element
+            raise RuntimeError(f"No element for selector: {selector}")
+
+        driver.find_element.side_effect = find_element
+
+        class FastWait:
+            def __init__(self, wait_driver, timeout):
+                self.driver = wait_driver
+
+            def until(self, condition):
+                result = condition(self.driver)
+                if not result:
+                    raise TimeoutException()
+                return result
+
+        with patch("market_utils.WebDriverWait", FastWait):
+            cash = get_current_money(driver)
+
+        self.assertEqual(cash, 8652116.0)
 
 
 class AutoBuyerTests(unittest.TestCase):
@@ -93,6 +121,97 @@ class PowerPlantTests(unittest.TestCase):
         self.assertEqual(text, "Finishes at 01/02/30 3:04 AM")
         self.assertEqual(finish_dt.year, 2030)
 
+    def test_starts_production_with_new_24hr_and_produce_power_labels(self):
+        state = {"duration_selected": False, "produced": False}
+        duration_button = Mock()
+        duration_button.is_displayed.return_value = True
+        duration_button.is_enabled.return_value = True
+        duration_button.click.side_effect = lambda: state.__setitem__("duration_selected", True)
+        produce_button = Mock()
+        produce_button.is_displayed.return_value = True
+        produce_button.is_enabled.return_value = True
+        produce_button.click.side_effect = lambda: state.__setitem__("produced", True)
+        confirmation_button = Mock()
+        confirmation_button.tag_name = "button"
+        confirmation_button.text = "Cancel Production"
+        finish_element = Mock()
+        finish_element.is_displayed.return_value = True
+        finish_element.text = "Finishes at 09/22/26 8:56 PM"
+
+        driver = Mock()
+        driver.current_url = "https://www.simcompanies.com/b/1/"
+
+        def find_element(by, selector):
+            if "24hr" in selector:
+                return duration_button
+            if "Produce Power" in selector or "starts-with(normalize-space(.), 'Produce')" in selector:
+                if state["duration_selected"]:
+                    return produce_button
+                raise RuntimeError("Produce Power is disabled until 24hr is selected")
+            if "Cancel Production" in selector and state["produced"]:
+                return confirmation_button
+            raise RuntimeError(f"New page has no element matching: {selector}")
+
+        driver.find_element.side_effect = find_element
+        driver.find_elements.side_effect = lambda by, selector: (
+            [finish_element] if state["produced"] else []
+        )
+
+        class FastWait:
+            def __init__(self, wait_driver, timeout):
+                self.driver = wait_driver
+
+            def until(self, condition):
+                try:
+                    result = condition(self.driver)
+                except Exception as error:
+                    raise TimeoutException() from error
+                if not result:
+                    raise TimeoutException()
+                return result
+
+        with patch.object(
+            PowerPlantProducer, "_load_finish_times", return_value={"/b/1/": None}
+        ), patch("production_monitor.WebDriverWait", FastWait), patch(
+            "production_monitor.time.sleep", return_value=None
+        ):
+            monitor = PowerPlantProducer(["/b/1/"], logger=Mock())
+            monitor.driver = driver
+            monitor._failure_alerted_paths.add("/b/1/")
+            started = monitor._check_and_start_production("/b/1/")
+
+        self.assertTrue(started)
+        duration_button.click.assert_called_once_with()
+        produce_button.click.assert_called_once_with()
+        self.assertIsNotNone(monitor.plant_finish_times["/b/1/"])
+        self.assertNotIn("/b/1/", monitor._failure_alerted_paths)
+
+    def test_repeated_start_timeouts_send_one_telegram_alert_until_recovery(self):
+        class AlwaysTimeoutWait:
+            def __init__(self, wait_driver, timeout):
+                self.driver = wait_driver
+
+            def until(self, condition):
+                raise TimeoutException()
+
+        with patch.object(
+            PowerPlantProducer, "_load_finish_times", return_value={"/b/1/": None}
+        ), patch("production_monitor.WebDriverWait", AlwaysTimeoutWait), patch(
+            "production_monitor.time.sleep", return_value=None
+        ), patch(
+            "production_monitor.send_telegram_notify", return_value=True
+        ) as notify:
+            monitor = PowerPlantProducer(["/b/1/"], logger=Mock())
+            monitor.driver = Mock()
+            monitor.driver.find_elements.return_value = []
+            self.assertFalse(monitor._check_and_start_production("/b/1/"))
+            self.assertFalse(monitor._check_and_start_production("/b/1/"))
+
+        notify.assert_called_once()
+        message = notify.call_args.args[0]
+        self.assertIn("/b/1/", message)
+        self.assertIn("逾時", message)
+
 
 class MonitorLoginTests(unittest.TestCase):
     def test_public_home_price_ticker_is_not_treated_as_authenticated(self):
@@ -149,6 +268,115 @@ class ServiceRunnerTests(unittest.TestCase):
 
 
 class ConstructionNotificationTests(unittest.TestCase):
+    def setUp(self):
+        self.state_directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.state_directory.cleanup)
+        self.state_file_path = os.path.join(
+            self.state_directory.name, "activity_state.json"
+        )
+
+    def _monitor(self, **kwargs):
+        return BuildingConstructionMonitor(
+            state_file_path=self.state_file_path, **kwargs
+        )
+
+    def test_manual_activity_recheck_defaults_to_one_hour(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(BuildingConstructionMonitor._get_manual_recheck_seconds(None), 3600)
+
+    def test_after_startup_only_due_buildings_are_inspected(self):
+        monitor = self._monitor(logger=Mock())
+        monitor._full_scan_pending = False
+        monitor._building_paths = ["/b/123/", "/b/456/"]
+        monitor._next_scan_at = {"/b/123/": 100.0, "/b/456/": 200.0}
+        idle = {
+            "name": "Test Store", "url": "https://www.simcompanies.com/b/123/",
+            "construction": None, "products": {},
+        }
+
+        with patch("production_monitor.time.time", return_value=100.0), \
+             patch.object(monitor, "_initialize_driver", return_value=True), \
+             patch.object(monitor, "_get_landscape_building_paths") as landscape, \
+             patch.object(monitor, "_inspect_building", return_value=idle) as inspect, \
+             patch.object(monitor, "_quit_driver"):
+            monitor._process_once()
+
+        landscape.assert_not_called()
+        inspect.assert_called_once_with("/b/123/")
+
+    def test_successful_completion_is_rechecked_one_hour_later(self):
+        monitor = self._monitor(logger=Mock())
+        monitor._full_scan_pending = False
+        monitor._building_paths = ["/b/123/"]
+        monitor._next_scan_at = {"/b/123/": 100.0}
+        monitor.state = {
+            "initialized": True,
+            "constructions": {},
+            "productions": {
+                "/b/123/": {
+                    "name": "Test Store",
+                    "url": "https://www.simcompanies.com/b/123/",
+                    "products": {
+                        "Widgets#1": {
+                            "name": "Widgets",
+                            "finish_at": "2020-01-01 00:00:00",
+                            "_missing_confirmations": 1,
+                        }
+                    },
+                }
+            },
+        }
+        idle = {
+            "name": "Test Store", "url": "https://www.simcompanies.com/b/123/",
+            "construction": None, "products": {},
+        }
+
+        with patch("production_monitor.time.time", return_value=100.0), \
+             patch.object(monitor, "_initialize_driver", return_value=True), \
+             patch.object(monitor, "_inspect_building", return_value=idle), \
+             patch.object(monitor, "_quit_driver"), \
+             patch("production_monitor.send_telegram_notify", return_value=True):
+            monitor._process_once()
+
+        self.assertNotIn("/b/123/", monitor.state["productions"])
+        self.assertEqual(monitor._next_scan_at["/b/123/"], 3700.0)
+
+    def test_completion_notification_logs_through_activity_logger(self):
+        logger = Mock()
+        monitor = self._monitor(logger=logger)
+        building = {"name": "Test Store", "url": "https://www.simcompanies.com/b/123/"}
+        product = {"name": "Tablets", "finish_at": "2020-01-01 00:00:00"}
+
+        with patch("production_monitor.send_telegram_notify", return_value=True) as notify:
+            self.assertTrue(monitor._send_production_notification(building, product))
+
+        self.assertIs(notify.call_args.kwargs["logger"], logger)
+
+    def test_retail_completion_is_retried_when_profit_report_is_empty(self):
+        logger = Mock()
+        monitor = self._monitor(logger=logger)
+        monitor.driver = Mock()
+        monitor.retail_profit_advisor = Mock()
+        monitor.retail_profit_advisor.is_target.return_value = True
+        monitor.retail_profit_advisor.analyse.return_value = []
+        monitor.retail_profit_advisor.telegram_text.return_value = ""
+        monitor.retail_profit_advisor.errors = ["Tablets: TimeoutException"]
+        building = {
+            "name": "Electronics Store Lv.15",
+            "url": "https://www.simcompanies.com/b/54696865/",
+        }
+        product = {"name": "Tablets", "finish_at": "2020-01-01 00:00:00"}
+
+        with patch("production_monitor.send_telegram_notify") as notify:
+            self.assertFalse(
+                monitor._send_production_notification(
+                    building, product, include_retail_advice=True
+                )
+            )
+
+        notify.assert_not_called()
+        logger.warning.assert_called_once()
+
     def test_removes_stale_timer_for_building_absent_from_loaded_landscape(self):
         with tempfile.TemporaryDirectory() as directory:
             monitor = BuildingConstructionMonitor(
@@ -171,7 +399,7 @@ class ConstructionNotificationTests(unittest.TestCase):
             self.assertEqual(monitor.state["productions"], {})
 
     def test_empty_landscape_timeout_preserves_previous_state(self):
-        monitor = BuildingConstructionMonitor(logger=Mock())
+        monitor = self._monitor(logger=Mock())
         monitor.driver = Mock()
         monitor.driver.find_elements.return_value = []
 
@@ -282,7 +510,7 @@ class ConstructionNotificationTests(unittest.TestCase):
             self.assertIn("Tablets#1", monitor.state["productions"]["/b/123/"]["products"])
 
     def test_power_products_are_ignored_by_default(self):
-        monitor = BuildingConstructionMonitor(logger=Mock())
+        monitor = self._monitor(logger=Mock())
         self.assertTrue(monitor._is_ignored_product("POWER Q7"))
         self.assertFalse(monitor._is_ignored_product("BATTERIES Q3"))
 
@@ -403,8 +631,60 @@ class TelegramTests(unittest.TestCase):
         self.assertEqual(post.call_args.kwargs["json"]["chat_id"], "chat")
         self.assertEqual(post.call_args.kwargs["json"]["text"], "hello")
 
+    @patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat"})
+    @patch("telegram_utils.requests.post")
+    def test_send_telegram_notify_logs_success(self, post):
+        response = Mock()
+        response.json.return_value = {"ok": True}
+        post.return_value = response
+        logger = Mock()
+
+        self.assertTrue(send_telegram_notify("hello", logger=logger))
+
+        logger.info.assert_called_once_with("[Telegram] 通知已成功送達 Telegram API。")
+
+    @patch.dict(os.environ, {"TELEGRAM_BOT_TOKEN": "token", "TELEGRAM_CHAT_ID": "chat"})
+    @patch("telegram_utils.requests.post")
+    def test_send_telegram_notify_logs_api_failure(self, post):
+        response = Mock()
+        response.json.return_value = {"ok": False, "description": "blocked"}
+        post.return_value = response
+        logger = Mock()
+
+        self.assertFalse(send_telegram_notify("hello", logger=logger))
+
+        logger.error.assert_called_once_with("[Telegram] 通知發送失敗：blocked")
+
 
 class RetailProfitAdvisorTests(unittest.TestCase):
+    def test_retail_breakdown_is_read_from_modal_around_close_button(self):
+        advisor = RetailProfitAdvisor()
+        driver = Mock()
+        close_button = Mock()
+        # The breakdown is rendered in a page-level modal, not inside the
+        # product card that opened it.
+        driver.execute_script.return_value = [
+            ["Revenue", "$1,234.50"],
+            ["Wages", "(-) $100.25"],
+            ["COGS", "(-) $900.00"],
+        ]
+
+        breakdown = advisor._read_retailing_breakdown(driver, close_button)
+
+        driver.execute_script.assert_called_once()
+        self.assertEqual(
+            breakdown,
+            {"Revenue": 1234.5, "Wages": 100.25, "COGS": 900.0},
+        )
+
+    def test_retail_breakdown_rejects_missing_modal_rows(self):
+        advisor = RetailProfitAdvisor()
+        driver = Mock()
+        driver.execute_script.return_value = []
+
+        with self.assertRaisesRegex(ValueError, "Incomplete retailing breakdown"):
+            advisor._read_retailing_breakdown(driver, Mock())
+
     def test_inventory_book_cost_is_replaced_not_deducted_twice(self):
         result = RetailRecommendation('Quadcopter', 543, 4, 124.819, 870, 865)
         self.assertAlmostEqual(result.net_profit_per_unit, 119.819)

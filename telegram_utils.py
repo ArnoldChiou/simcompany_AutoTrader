@@ -13,17 +13,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def send_telegram_notify(message):
+def _report(logger, level, message):
+    if logger:
+        getattr(logger, level)(message)
+    else:
+        print(message)
+
+
+def send_telegram_notify(message, logger=None):
     """Send *message* to the configured Telegram chat.
 
     Returns ``True`` only when Telegram accepted the message.  Configuration
-    and network failures are reported to the console instead of stopping a
-    monitor loop.
+    and network failures are reported through *logger* when provided, or to
+    the console otherwise, without stopping a monitor loop.
     """
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
     if not token or not chat_id:
-        print("[警告] Telegram 未設定：請在 .env 加入 TELEGRAM_BOT_TOKEN 與 TELEGRAM_CHAT_ID。")
+        _report(
+            logger,
+            "warning",
+            "[Telegram] 未設定：請在 .env 加入 TELEGRAM_BOT_TOKEN 與 TELEGRAM_CHAT_ID。",
+        )
         return False
 
     try:
@@ -35,12 +46,16 @@ def send_telegram_notify(message):
         response.raise_for_status()
         payload = response.json()
         if not payload.get("ok", False):
-            print(f"[錯誤] Telegram 通知發送失敗：{payload.get('description', 'unknown error')}")
+            _report(
+                logger,
+                "error",
+                f"[Telegram] 通知發送失敗：{payload.get('description', 'unknown error')}",
+            )
             return False
-        print("[通知] Telegram 通知已發送。")
+        _report(logger, "info", "[Telegram] 通知已成功送達 Telegram API。")
         return True
     except requests.RequestException as error:
-        print(f"[錯誤] Telegram 通知發送失敗：{error}")
+        _report(logger, "error", f"[Telegram] 通知發送失敗：{error}")
     except ValueError:
-        print("[錯誤] Telegram 回傳了無法解析的內容。")
+        _report(logger, "error", "[Telegram] 回傳了無法解析的內容。")
     return False

@@ -13,6 +13,7 @@ This project offers a suite of tools designed to automate various tasks within t
     *   **Oil Rig**: Monitors construction status, checks resource abundance, and automatically triggers "Rebuild" if abundance drops below 95%.
 *   **Telegram Activity Notifications**: Scans every building on your Landscape and sends a Telegram message when construction or product production completes.
 *   **Retail Profit Advisor**: When `/b/54696865/` finishes selling and becomes idle, appends a 48-hour product ranking to its Telegram completion notice. It subtracts the quantity-weighted cost of buying each product from the Exchange; it never submits a buy or production order.
+*   **Warehouse VWAP company-description updater**: Reads positive, unblocked warehouse stock for every quality, fetches daily VWAP from SimcoTools, prices each listing 2% below VWAP (three decimals below $1; otherwise two), groups products by the category sections shown on the warehouse page in a text table, and updates only the listing section in the public company description through the game's settings form. It backs up the original description and verifies the saved text by reading it back.
 *   **Email Notifications**: Sends email alerts via Gmail for critical events like required logins, completed constructions, or monitoring errors.
 *   **Selenium Automation**: Employs Selenium with `webdriver-manager` to control a Chrome browser. It supports using a specific Chrome user profile to maintain login sessions.
 *   **Logging**: Records successful trades and detailed monitoring activities to text files for review.
@@ -21,6 +22,7 @@ This project offers a suite of tools designed to automate various tasks within t
 ## Project Structure
 
 *   `main.py`: The main entry point for the application. Displays a menu to select the desired function (Login, Auto-Buy, Monitors).
+*   `company_vwap_updater.py`: Reads warehouse stock, fetches matching VWAPs from SimcoTools, and updates the company-description listing.
 *   `AutoBuyer.py`: Contains the `AutoBuyer` class, handling the logic for automatic market purchases using Selenium.
 *   `production_monitor.py`: Includes classes (`ForestNurseryMonitor`, `PowerPlantProducer`, `OilRigMonitor`) for monitoring and managing production/construction tasks.
 *   `config.py`: Central configuration file for API URLs, product lists, purchase thresholds, and market headers.
@@ -72,8 +74,10 @@ This project offers a suite of tools designed to automate various tasks within t
     TELEGRAM_BOT_TOKEN=123456789:your_bot_token
     TELEGRAM_CHAT_ID=your_telegram_chat_id
     USER_DATA_DIR_construction_monitor=C:\Users\YourUser\AppData\Local\Google\Chrome\User Data
-    # Active timers are checked at their recorded completion time; this applies only when idle.
-    ACTIVITY_IDLE_RECHECK_SECONDS=3600
+    # Do not share this directory with Forest Nursery or another Selenium service.
+    # Idle/manual buildings are rechecked hourly; active buildings are scanned
+    # at their recorded completion time.
+    ACTIVITY_MANUAL_RECHECK_SECONDS=3600
     TELEGRAM_IGNORED_PRODUCTS=POWER
     # Optional separate profile; otherwise the construction-monitor profile is used.
     USER_DATA_DIR_retail_advisor=C:\Users\YourUser\AppData\Local\Google\Chrome\User Data
@@ -112,6 +116,7 @@ This project offers a suite of tools designed to automate various tasks within t
     *   **Monitor All Oil Rigs**: Starts the Oil Rig monitoring and rebuild task.
     *   **Monitor All Construction & Product Completions (Telegram)**: Monitors every building shown on Landscape and sends a Telegram alert after construction or product production completes.
     *   **Compare Retail Profit (48h, Telegram)**: Runs the same read-only comparison immediately and sends the ranking to Telegram.
+    *   **Update company description from warehouse VWAPs**: Scans the signed-in warehouse, lists each stocked product quality at 2% below its SimcoTools daily VWAP (three decimals for prices below $1; otherwise two), grouped by the exact category sections shown on the warehouse page in a text table, and saves the listing to the `Change company description` area. The original text is backed up and the saved description is read back for verification. Uses `USER_DATA_DIR_construction_monitor` unless `SIMCOMPANIES_VWAP_PROFILE` is set.
     *   **Exit**: Closes the application.
 
 ## Logs

@@ -9,6 +9,18 @@ $ErrorActionPreference = 'Stop'
 $projectPath = Split-Path -Parent $MyInvocation.MyCommand.Definition
 
 function Resolve-PythonExecutable {
+    $pythonRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
+    if (Test-Path -LiteralPath $pythonRoot) {
+        $installedPython = Get-ChildItem -LiteralPath $pythonRoot -Filter python.exe -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($installedPython) {
+            return $installedPython.FullName
+        }
+    }
+
+    # The current shell may expose an unrelated bundled Python first.  Prefer
+    # the user's installed interpreter, where this project's dependencies live.
     $pythonCommand = Get-Command python.exe -ErrorAction SilentlyContinue
     if ($pythonCommand) {
         return $pythonCommand.Source
@@ -19,16 +31,6 @@ function Resolve-PythonExecutable {
         Select-Object -First 1
     if ($runningPython) {
         return $runningPython.Path
-    }
-
-    $pythonRoot = Join-Path $env:LOCALAPPDATA 'Programs\Python'
-    if (Test-Path -LiteralPath $pythonRoot) {
-        $installedPython = Get-ChildItem -LiteralPath $pythonRoot -Filter python.exe -Recurse -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-        if ($installedPython) {
-            return $installedPython.FullName
-        }
     }
 
     throw 'Python executable was not found. Install Python or add python.exe to PATH.'
@@ -64,8 +66,12 @@ function Stop-ProjectProcess {
         if ([int]::TryParse($pidText, [ref]$storedPid)) {
             $managedProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $storedPid" -ErrorAction SilentlyContinue
             if ($managedProcess -and $managedProcess.CommandLine -like '*service_runner.py*') {
-                Write-Host "Stopping $Name (PID $storedPid)..."
-                Stop-Process -Id $storedPid -Force -ErrorAction SilentlyContinue
+                Write-Host "Stopping $Name process tree (PID $storedPid)..."
+                # Selenium launches Chrome and ChromeDriver as children.  Stop
+                # the complete tree so a stale Chrome process cannot lock the
+                # profile during the next launch.
+                & taskkill.exe /PID $storedPid /T /F | Out-Null
+                Wait-Process -Id $storedPid -Timeout 15 -ErrorAction SilentlyContinue
                 $stoppedIds += $storedPid
             } elseif ($managedProcess) {
                 Write-Warning "PID $storedPid no longer belongs to $Name; it was not stopped."
@@ -79,8 +85,9 @@ function Stop-ProjectProcess {
     $legacyProcesses = Get-CimInstance Win32_Process -Filter "Name = 'python.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -like "*$LegacyMarker*" -and $_.ProcessId -notin $stoppedIds }
     foreach ($legacyProcess in $legacyProcesses) {
-        Write-Host "Stopping legacy $Name process (PID $($legacyProcess.ProcessId))..."
-        Stop-Process -Id $legacyProcess.ProcessId -Force -ErrorAction SilentlyContinue
+        Write-Host "Stopping legacy $Name process tree (PID $($legacyProcess.ProcessId))..."
+        & taskkill.exe /PID $legacyProcess.ProcessId /T /F | Out-Null
+        Wait-Process -Id $legacyProcess.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
     }
 }
 

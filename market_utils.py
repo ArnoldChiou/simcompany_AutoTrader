@@ -106,9 +106,9 @@ def get_current_money(driver, landscape_url="https://www.simcompanies.com/landsc
     try:
         print(f"Navigating to {landscape_url}...")
         driver.get(landscape_url)
-        # Wait for the money element to be present and visible
+        # Wait for the current money balance element to be present and visible.
         money_element = WebDriverWait(driver, 20).until(
-            EC.visibility_of_element_located((By.ID, "js-animation-money"))
+            EC.visibility_of_element_located((By.ID, "money-balance"))
         )
         money_text = money_element.text
         # Extract the numerical value using regex, removing $ and commas

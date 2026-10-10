@@ -86,28 +86,12 @@ def initialize_driver(user_data_dir=None, user_data_dir_env_var="USER_DATA_DIR",
                 print("[資訊] Chrome 使用指定的 User Data Directory 啟動成功。")
                 return driver
             except Exception as e:
-                print(f"[警告] 使用 user-data-dir ({effective_user_data_dir}) 啟動 Chrome 失敗: {e}")
-                print("[資訊] 將改用預設 (臨時) profile 啟動 Chrome。")
-                # Reset options for a clean default profile attempt
-                options = webdriver.ChromeOptions()
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                # options.add_argument('--remote-debugging-port=9222') # REMOVED
-                options.add_argument('--disable-gpu')
-                options.add_argument('--headless=new')
-                options.add_argument('--window-size=1920,1080')
-                options.add_argument('--disable-extensions')
-                options.add_experimental_option("excludeSwitches", ["enable-logging"])
-
-                chrome_version = get_installed_chrome_version()
-                if chrome_version:
-                    print(f"[資訊] (Fallback) 偵測到 Chrome 版本: {chrome_version}。使用此版本對應的 ChromeDriver。")
-                    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager(driver_version=chrome_version).install()), options=options)
-                else:
-                    print("[警告] (Fallback) 未偵測到已安裝的 Chrome 版本。嘗試使用最新版 ChromeDriver。")
-                    driver = webdriver.Chrome(service=ChromeService(ChromeDriverManager().install()), options=options)
-                print("[資訊] Chrome 已使用預設 (臨時) profile 啟動。")
-                return driver
+                # A temporary profile has no authenticated SimCompanies
+                # session.  Falling back silently turns a profile crash into
+                # a misleading login failure and disables notifications.
+                raise RuntimeError(
+                    f"Chrome could not start with the requested user-data-dir: {effective_user_data_dir}"
+                ) from e
         else:
             if not effective_user_data_dir:
                 print(f"[警告] 未指定 user_data_dir 且環境變數 {user_data_dir_env_var} 未設置或為空。")

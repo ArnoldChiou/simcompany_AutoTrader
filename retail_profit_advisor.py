@@ -302,14 +302,7 @@ class RetailProfitAdvisor:
         close = WebDriverWait(driver, 10).until(lambda d: d.find_element(
             By.CSS_SELECTOR, 'button[aria-label="Close modal - Retailing breakdown"]'))
         try:
-            rows = card.find_elements(By.CSS_SELECTOR, 'tr')
-            breakdown = {}
-            for row in rows:
-                cells = row.find_elements(By.CSS_SELECTOR, 'td')
-                if len(cells) >= 2 and cells[0].text.strip() in ('Revenue', 'Wages', 'COGS'):
-                    breakdown[cells[0].text.strip()] = parse_number(cells[1].text)
-            if set(breakdown) != {'Revenue', 'Wages', 'COGS'} or any(v is None for v in breakdown.values()):
-                raise ValueError('Incomplete retailing breakdown')
+            breakdown = self._read_retailing_breakdown(driver, close)
             # Negative costs are displayed as "(-) $...".
             book_cost = abs(breakdown['COGS'])
             retail_profit = breakdown['Revenue'] - abs(breakdown['Wages']) - book_cost
@@ -329,6 +322,40 @@ class RetailProfitAdvisor:
             retail_price=breakdown['Revenue'],
             average_retail_price=average_price,
         )
+
+    @staticmethod
+    def _read_retailing_breakdown(driver, close_button: WebElement) -> dict[str, float]:
+        """Read the breakdown table from the modal opened by this product card.
+
+        SimCompanies renders the help modal outside the retail card in the
+        page-level overlay. Start at its close button and walk upward to the
+        nearest ancestor containing all expected rows, rather than searching
+        inside the card that opened it.
+        """
+        rows = driver.execute_script(
+            """
+            let node = arguments[0];
+            while (node && node !== document.body) {
+              const rows = Array.from(node.querySelectorAll('tr')).map(row =>
+                Array.from(row.querySelectorAll('td')).map(cell => (cell.innerText || '').trim())
+              );
+              const labels = new Set(rows.filter(cells => cells.length >= 2).map(cells => cells[0]));
+              if (['Revenue', 'Wages', 'COGS'].every(label => labels.has(label))) return rows;
+              node = node.parentElement;
+            }
+            return [];
+            """,
+            close_button,
+        ) or []
+        breakdown = {}
+        for cells in rows:
+            if len(cells) >= 2 and cells[0] in ('Revenue', 'Wages', 'COGS'):
+                breakdown[cells[0]] = parse_number(cells[1])
+        if set(breakdown) != {'Revenue', 'Wages', 'COGS'} or any(
+            value is None for value in breakdown.values()
+        ):
+            raise ValueError('Incomplete retailing breakdown')
+        return breakdown
 
     @staticmethod
     def _pick_input(inputs, words: tuple[str, ...], fallback: int) -> WebElement:
