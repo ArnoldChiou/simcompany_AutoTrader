@@ -223,6 +223,8 @@ def format_listing_rows(
     market_by_id: dict[int, dict[str, Any]],
     category_by_resource: dict[int, str],
     category_order: list[str],
+    *,
+    use_product_names: bool = False,
 ) -> list[str]:
     """Group discounted VWAP prices in the same order as warehouse sections."""
     if not category_order:
@@ -239,7 +241,9 @@ def format_listing_rows(
         decimal_places = 3 if discounted < Decimal("1") else 2
         quantum = Decimal("0.001") if decimal_places == 3 else Decimal("0.01")
         price = discounted.quantize(quantum, rounding=ROUND_HALF_UP)
-        row = f"Q{quality} | :re-{resource_id}: | ${price:.{decimal_places}f}"
+        product = str(payload["resource"].get("resourceName") or f"Product {resource_id}") if use_product_names else f":re-{resource_id}:"
+        product = " ".join(product.split())
+        row = f"Q{quality} | {product} | ${price:.{decimal_places}f}"
         grouped.setdefault(category, []).append((resource_id, quality, row))
 
     rows = ["Q | Product | Price"]
@@ -319,6 +323,7 @@ class UpdateResult:
     original_description: str
     updated_description: str
     backup_path: Path | None
+    listing_text: str = ""
 
 
 def update_company_description(
@@ -342,6 +347,9 @@ def update_company_description(
         market = fetch_market_data({resource_id for resource_id, _ in inventory}, realm_id)
         rows = format_listing_rows(inventory, market, categories, category_order)
         updated = replace_listing(current, rows)
+        listing_text = "\n".join(format_listing_rows(
+            inventory, market, categories, category_order, use_product_names=True,
+        ))
         backup_path = None
         if apply and updated != current:
             backup_path = BACKUP_DIRECTORY / f"company-description-{time.strftime('%Y%m%d-%H%M%S')}.txt"
@@ -350,6 +358,6 @@ def update_company_description(
             save_description_via_ui(driver, realm_id, company_id, updated)
         elif apply:
             log.info("公司簡介已符合目前倉庫 VWAP，略過重複寫入。")
-        return UpdateResult(company_id, realm_id, len(inventory), current, updated, backup_path)
+        return UpdateResult(company_id, realm_id, len(inventory), current, updated, backup_path, listing_text)
     finally:
         driver.quit()

@@ -67,6 +67,25 @@ class InventoryTests(unittest.TestCase):
             ],
         )
 
+    def test_named_rows_show_real_product_names_and_same_listing_prices(self):
+        market = {
+            5: {"resource": {"resourceName": "Water", "summariesByQuality": [
+                {"quality": 0, "lastDayCandlestick": {"vwap": "0.12345"}},
+            ]}},
+            22: {"resource": {"resourceName": "Batteries", "summariesByQuality": [
+                {"quality": 4, "lastDayCandlestick": {"vwap": "85.38966"}},
+            ]}},
+        }
+        rows = format_listing_rows(
+            {(22, 4): 9186, (5, 0): 1}, market,
+            {5: "Energy", 22: "Electronics"}, ["Energy", "Electronics"],
+            use_product_names=True,
+        )
+        self.assertEqual(rows, [
+            "Q | Product | Price", "[Energy]", "Q0 | Water | $0.121",
+            "[Electronics]", "Q4 | Batteries | $83.68",
+        ])
+
     def test_fetches_official_resource_constants(self):
         constants = {"119": {"image": "images/resources/coffee-ground.png"}}
         session = Mock()
@@ -105,6 +124,31 @@ class InventoryTests(unittest.TestCase):
     def test_fails_closed_when_any_stocked_quality_has_no_vwap(self):
         with self.assertRaisesRegex(ValueError, "商品.*ID 22.*Q4"):
             format_listing_rows({(22, 4): 1}, {22: {"resource": {"resourceId": 22, "summariesByQuality": []}}}, {22: "Electronics"}, ["Electronics"])
+
+
+class UpdateReportTests(unittest.TestCase):
+    def test_preview_returns_named_listing_from_the_same_market_snapshot(self):
+        from company_vwap_updater import update_company_description
+        driver = Mock()
+        market = {22: {"resource": {"resourceName": "Batteries", "summariesByQuality": [
+            {"quality": 4, "lastDayCandlestick": {"vwap": "85.38966"}},
+        ]}}}
+        description = "Selling @VWAP\nold\n--------------------\nfooter"
+        with patch("company_vwap_updater.resolve_profile", return_value="profile"), \
+             patch("company_vwap_updater.initialize_driver", return_value=driver), \
+             patch("company_vwap_updater.get_account_data", return_value=(123, 0, [
+                 {"kind": 22, "quality": 4, "amount": 5}], description)), \
+             patch("company_vwap_updater.fetch_resource_constants", return_value={}), \
+             patch("company_vwap_updater.get_warehouse_categories", return_value=(["Electronics"], {22: "Electronics"})), \
+             patch("company_vwap_updater.fetch_market_data", return_value=market) as fetch, \
+             patch("company_vwap_updater.save_description_via_ui") as save:
+            result = update_company_description(apply=False)
+        self.assertEqual(result.listing_text, "Q | Product | Price\n[Electronics]\nQ4 | Batteries | $83.68")
+        self.assertIn("Q4 | :re-22: | $83.68", result.updated_description)
+        self.assertEqual(result.item_count, 1)
+        fetch.assert_called_once_with({22}, 0)
+        save.assert_not_called()
+        driver.quit.assert_called_once()
 
 
 class DescriptionTests(unittest.TestCase):
