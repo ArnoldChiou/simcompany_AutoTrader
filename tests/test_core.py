@@ -352,6 +352,43 @@ class ConstructionNotificationTests(unittest.TestCase):
 
         self.assertIs(notify.call_args.kwargs["logger"], logger)
 
+    def test_production_completion_includes_best_product_recommendation(self):
+        monitor = self._monitor(logger=Mock())
+        monitor.driver = Mock()
+        building = {"name": "Electronics Factory", "url": "https://www.simcompanies.com/b/123/"}
+        product = {"name": "Batteries", "finish_at": "2020-01-01 00:00:00", "activity_type": "production"}
+
+        with patch("production_monitor.recommend_best_product", return_value=("High grade e-comps", 776.056, 343.648)), \
+             patch("production_monitor.send_telegram_notify", return_value=True) as notify:
+            self.assertTrue(monitor._send_production_notification(building, product))
+
+        self.assertIn("建議接續生產：High grade e-comps", notify.call_args.args[0])
+        self.assertIn("343.648", notify.call_args.args[0])
+
+    def test_nonproduction_completion_does_not_request_factory_recommendation(self):
+        monitor = self._monitor(logger=Mock())
+        monitor.driver = Mock()
+        building = {"name": "Retail Store", "url": "https://www.simcompanies.com/b/123/"}
+        product = {"name": "Batteries", "finish_at": "2020-01-01 00:00:00", "activity_type": "selling"}
+
+        with patch("production_monitor.recommend_best_product") as recommend, \
+             patch("production_monitor.send_telegram_notify", return_value=True):
+            self.assertTrue(monitor._send_production_notification(building, product))
+
+        recommend.assert_not_called()
+
+    def test_legacy_completion_without_activity_type_does_not_request_recommendation(self):
+        monitor = self._monitor(logger=Mock())
+        monitor.driver = Mock()
+        building = {"name": "Legacy Store", "url": "https://www.simcompanies.com/b/456/"}
+        product = {"name": "Pumpkin", "finish_at": "2020-01-01 00:00:00"}
+
+        with patch("production_monitor.recommend_best_product", return_value=None) as recommend, \
+             patch("production_monitor.send_telegram_notify", return_value=True):
+            self.assertTrue(monitor._send_production_notification(building, product))
+
+        recommend.assert_not_called()
+
     def test_retail_completion_is_retried_when_profit_report_is_empty(self):
         logger = Mock()
         monitor = self._monitor(logger=logger)

@@ -9,6 +9,7 @@ import random
 import json
 from dateutil import parser
 from dotenv import load_dotenv
+from decimal import Decimal
 
 
 from selenium.webdriver.common.by import By
@@ -27,6 +28,7 @@ from email_utils import send_email_notify
 from telegram_utils import send_telegram_notify
 from config import POWER_PLANT_PATHS
 from retail_profit_advisor import RetailProfitAdvisor
+from building_profit_advisor import recommend_best_product
 
 # --- Logging Setup ---
 def setup_logger(name, log_filename):
@@ -1475,7 +1477,11 @@ class BuildingConstructionMonitor(BaseMonitor):
                     continue
                 product_names[display_name] = product_names.get(display_name, 0) + 1
                 product_key = f"{display_name}#{product_names[display_name]}"
-                products[product_key] = {"name": display_name, "finish_at": finish_at}
+                products[product_key] = {
+                    "name": display_name,
+                    "finish_at": finish_at,
+                    "activity_type": activity_type,
+                }
             products = self._dedupe_products(products)
             if construction:
                 self.logger.info(f"[{self.name}] {name} ({path}) construction finishes at {construction['finish_at'] or 'unknown'}.")
@@ -1597,6 +1603,28 @@ class BuildingConstructionMonitor(BaseMonitor):
             message += f"\n\n資料時間：{self.retail_profit_advisor.checked_at}\n" + advice
             if self.retail_profit_advisor.errors:
                 message += '\n未完成比較：' + '；'.join(self.retail_profit_advisor.errors)
+        if product.get("activity_type") == "production" and self.driver:
+            try:
+                recommendation = recommend_best_product(self.driver, building.get("url", ""))
+            except Exception as error:
+                self.logger.warning(
+                    "[BuildingProfitAdvisor] Could not recommend a product for %s: %s",
+                    building.get("url", ""),
+                    error,
+                )
+                recommendation = None
+            if recommendation:
+                product_name, vwap, gross_margin = recommendation
+                format_money = lambda value: f"${Decimal(str(value)):,.3f}".rstrip("0").rstrip(".")
+                message += (
+                    "\n\n建議接續生產：" + product_name
+                    + f"\nQ0 參考價：{format_money(vwap)}"
+                    + f"\n預估單位毛利：{format_money(gross_margin)}（未扣工資、運輸與交易費）"
+                    + "\n價格優先使用 Q0 日 VWAP，缺少時回退最新成交價。"
+                    + "\n僅提供建議，不會自動開始生產。"
+                )
+            else:
+                message += "\n\n目前無法取得可用的 Q0 VWAP／最新成交價或配方資料，暫無接續生產建議。"
         return send_telegram_notify(message, logger=self.logger)
 
     def _update_state_and_notify(self, inspected, active_paths=None):

@@ -49,6 +49,7 @@ class MarketQuote:
     name: str
     quality_zero_price: Decimal | None
     timestamp: str | None
+    price_source: str = "daily VWAP"
 
 
 def deduplicate_buildings(buildings: list[Building]) -> list[Building]:
@@ -79,7 +80,7 @@ def calculate_unit_gross_profit(
     output_price: Decimal,
     input_prices: dict[int, Decimal],
 ) -> Decimal | None:
-    """Output Q0 last-trade price less recipe input costs; None if a quote is missing."""
+    """Subtract recipe input reference costs from output price; None if any required quote is missing."""
     if not output_price.is_finite() or output_price <= 0:
         return None
     total = output_price
@@ -206,16 +207,32 @@ def _quote_from_payload(payload: dict[str, Any]) -> MarketQuote:
     if not isinstance(summaries, list):
         raise ValueError(f"{resource.get('resourceName', '商品')} 缺少市場摘要")
     summary = next((item for item in summaries if str(item.get("quality")) == "0"), None)
-    price, timestamp = None, None
+    price, timestamp, price_source = None, None, "unavailable"
     if summary:
+        candle = summary.get("lastDayCandlestick") or {}
         try:
-            parsed = Decimal(str(summary["price"]))
-            if parsed.is_finite() and parsed > 0:
-                price = parsed
-                timestamp = str(summary.get("timestamp") or "") or None
+            parsed_vwap = Decimal(str(candle["vwap"]))
+            if parsed_vwap.is_finite() and parsed_vwap > 0:
+                price = parsed_vwap
+                timestamp = str(candle.get("date") or "") or None
+                price_source = "daily VWAP"
         except (KeyError, TypeError, InvalidOperation):
             pass
-    return MarketQuote(str(resource.get("resourceName") or f"ID {resource.get('resourceId', '?')}"), price, timestamp)
+        if price is None:
+            try:
+                parsed_trade = Decimal(str(summary["price"]))
+                if parsed_trade.is_finite() and parsed_trade > 0:
+                    price = parsed_trade
+                    timestamp = str(summary.get("timestamp") or "") or None
+                    price_source = "latest trade"
+            except (KeyError, TypeError, InvalidOperation):
+                pass
+    return MarketQuote(
+        str(resource.get("resourceName") or f"ID {resource.get('resourceId', '?')}"),
+        price,
+        timestamp,
+        price_source,
+    )
 
 
 def fetch_quotes(resource_ids: set[int], realm_id: int, session: requests.Session | None = None) -> dict[int, MarketQuote]:
@@ -266,6 +283,60 @@ def build_product_rows(
     return rows
 
 
+def recommend_best_product(driver, building_url: str) -> tuple[str, Decimal, Decimal] | None:
+    """Return (product name, Q0 reference price, unit gross margin) for one building.
+
+    Uses the caller's authenticated Selenium driver so the completion monitor
+    does not launch a competing Chrome process or a second profile session.
+    This function is strictly read-only and never submits production orders.
+    """
+    parsed_url = urlsplit(building_url)
+    if parsed_url.scheme != "https" or parsed_url.netloc != "www.simcompanies.com":
+        raise ValueError("建築網址不是 SimCompanies 官方網址。")
+    match = re.fullmatch(r"/b/(\d+)/?", parsed_url.path)
+    if not match:
+        raise ValueError("建築網址路徑格式不正確。")
+    path = f"/b/{match.group(1)}/"
+    driver.get(building_url)
+    auth = _get_json(driver, "/api/v3/companies/auth-data/")
+    realm_id = ((auth or {}).get("authCompany") or {}).get("realmId")
+    if realm_id is None:
+        return None
+    resource_constants = _get_json(driver, "/api/v2/constants/resources/")
+    if not isinstance(resource_constants, dict):
+        return None
+    resolved, _issues = _production_building_codes(
+        driver, [Building(path, "", None)], resource_constants
+    )
+    if not resolved or not resolved[0].code:
+        return None
+    code = resolved[0].code
+    produced_ids = products_for_building(code, resource_constants)
+    tradable_ids = {
+        resource_id for resource_id in produced_ids
+        if resource_constants[str(resource_id)].get("isExchangeTradable", False)
+    }
+    input_ids = set()
+    for resource_id in tradable_ids:
+        input_ids.update(
+            int(input_id)
+            for input_id in (resource_constants[str(resource_id)].get("producedFrom") or {})
+        )
+    if not tradable_ids:
+        return None
+    quotes = fetch_quotes(tradable_ids | input_ids, int(realm_id))
+    rows = build_product_rows(code, resource_constants, quotes)
+    ranked = [
+        (product, quote, profit)
+        for product, quote, profit in rows
+        if product.market_tradable and quote.quality_zero_price is not None and profit is not None
+    ]
+    if not ranked:
+        return None
+    product, quote, gross_margin = max(ranked, key=lambda row: row[2])
+    return product.name, quote.quality_zero_price, gross_margin
+
+
 def _money(value: Decimal | None) -> str:
     return "無報價" if value is None else f"${value:,.3f}".rstrip("0").rstrip(".")
 
@@ -280,7 +351,7 @@ def render_report(
         "SimCompanies 建築產品利潤比較（唯讀）",
         f"資料時間：{checked_at}",
         f"Landscape 建築數：{len(buildings)}（重複建築已去除）",
-        "計算方式：Q0 最新成交價 − 配方投入成本；未扣工資、運輸、交易費與建築升級差異。",
+        "計算方式：優先用 Q0 日 VWAP，缺少時回退最新成交價；減去配方投入成本。未扣工資、運輸、交易費與建築升級差異。",
         "",
     ]
     groups: dict[tuple[str, str | None], list[Building]] = {}
@@ -306,11 +377,15 @@ def render_report(
             if not product.market_tradable:
                 result = "不可交易，無交易所價格"
             elif quote.quality_zero_price is None:
-                result = "無最新交易所報價，毛利無法計算"
+                result = "缺少 Q0 日 VWAP 與最新成交價，毛利無法計算"
             else:
                 result = f"單位毛利 {_money(profit)}" if profit is not None else "單位毛利無法計算（缺少投入品報價）"
             market_price = quote.quality_zero_price if product.market_tradable else None
-            lines.append(f"  • {product.name} — 市場價 {_money(market_price)}；{result}")
+            price_label = {
+                "daily VWAP": "Q0 日 VWAP",
+                "latest trade": "Q0 最新成交價",
+            }.get(quote.price_source, "Q0 報價")
+            lines.append(f"  • {product.name} — {price_label} {_money(market_price)}；{result}")
         if ranked:
             best = ranked[0]
             lines.append(f"  ★ 毛利最高：{best[0].name}（{_money(best[2])}/單位）")
@@ -369,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     from dotenv import load_dotenv
 
     load_dotenv()
-    parser = argparse.ArgumentParser(description="列出 Landscape 建築產品並比較 Q0 單位毛利（唯讀）")
+    parser = argparse.ArgumentParser(description="列出建築產品並以 Q0 日 VWAP（缺少時回退最新成交價）比較單位毛利")
     parser.add_argument("--profile", help="已登入 SimCompanies 的 Chrome user-data-dir")
     args = parser.parse_args(argv)
     try:
