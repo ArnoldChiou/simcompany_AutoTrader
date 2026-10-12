@@ -122,6 +122,30 @@ class BuildingProfitAdvisorTests(unittest.TestCase):
         self.assertEqual(driver.visited, ["https://www.simcompanies.com/b/123/"])
         fetch.assert_called_once_with({10, 11, 20}, 0)
 
+    def test_completed_product_identifies_building_when_idle_page_has_no_production_heading(self):
+        class Driver:
+            def get(self, url):
+                pass
+
+        constants = {
+            "10": {"producedAt": "F", "isExchangeTradable": True, "image": "images/resources/plain.png", "producedFrom": {}},
+            "11": {"producedAt": "F", "isExchangeTradable": True, "image": "images/resources/processed.png", "producedFrom": {"20": 2}},
+            "20": {"producedAt": "X", "isExchangeTradable": True, "image": "images/resources/input.png", "producedFrom": {}},
+        }
+        quotes = {
+            10: MarketQuote("Plain", Decimal("8"), None),
+            11: MarketQuote("Processed", Decimal("20"), None),
+            20: MarketQuote("Input", Decimal("3"), None),
+        }
+        with patch("building_profit_advisor._get_json", side_effect=[{"authCompany": {"realmId": 0}}, constants]), \
+             patch("building_profit_advisor._production_building_codes", return_value=([Building("/b/123/", "Factory", None)], ["no active production heading"])), \
+             patch("building_profit_advisor.fetch_quotes", return_value=quotes) as fetch:
+            recommendation = recommend_best_product(
+                Driver(), "https://www.simcompanies.com/b/123/", completed_product_name="Processed"
+            )
+        self.assertEqual(recommendation, ("Processed", Decimal("20"), Decimal("14")))
+        fetch.assert_called_once_with({10, 11, 20}, 0)
+
     def test_best_product_rejects_non_simcompanies_urls(self):
         with self.assertRaises(ValueError):
             recommend_best_product(object(), "https://example.com/b/123/")

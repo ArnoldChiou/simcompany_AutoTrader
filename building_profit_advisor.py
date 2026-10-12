@@ -283,7 +283,11 @@ def build_product_rows(
     return rows
 
 
-def recommend_best_product(driver, building_url: str) -> tuple[str, Decimal, Decimal] | None:
+def recommend_best_product(
+    driver,
+    building_url: str,
+    completed_product_name: str | None = None,
+) -> tuple[str, Decimal, Decimal] | None:
     """Return (product name, Q0 reference price, unit gross margin) for one building.
 
     Uses the caller's authenticated Selenium driver so the completion monitor
@@ -308,9 +312,14 @@ def recommend_best_product(driver, building_url: str) -> tuple[str, Decimal, Dec
     resolved, _issues = _production_building_codes(
         driver, [Building(path, "", None)], resource_constants
     )
-    if not resolved or not resolved[0].code:
+    code = resolved[0].code if resolved else None
+    if not code and completed_product_name:
+        product_label = re.sub(r"\s+Q\d+\s*$", "", completed_product_name.strip(), flags=re.IGNORECASE)
+        product_match = _resource_code_by_name(resource_constants).get(_normalise(product_label))
+        if product_match:
+            code = product_match[1]
+    if not code:
         return None
-    code = resolved[0].code
     produced_ids = products_for_building(code, resource_constants)
     tradable_ids = {
         resource_id for resource_id in produced_ids

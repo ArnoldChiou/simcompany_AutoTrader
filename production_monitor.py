@@ -1605,7 +1605,11 @@ class BuildingConstructionMonitor(BaseMonitor):
                 message += '\n未完成比較：' + '；'.join(self.retail_profit_advisor.errors)
         if product.get("activity_type") == "production" and self.driver:
             try:
-                recommendation = recommend_best_product(self.driver, building.get("url", ""))
+                recommendation = recommend_best_product(
+                    self.driver,
+                    building.get("url", ""),
+                    completed_product_name=product.get("name"),
+                )
             except Exception as error:
                 self.logger.warning(
                     "[BuildingProfitAdvisor] Could not recommend a product for %s: %s",
@@ -1624,7 +1628,7 @@ class BuildingConstructionMonitor(BaseMonitor):
                     + "\n僅提供建議，不會自動開始生產。"
                 )
             else:
-                message += "\n\n目前無法取得可用的 Q0 VWAP／最新成交價或配方資料，暫無接續生產建議。"
+                message += "\n\n目前無法確認此建築的可生產產品，或取得所需 Q0 價格／配方資料，暫無接續生產建議。"
         return send_telegram_notify(message, logger=self.logger)
 
     def _update_state_and_notify(self, inspected, active_paths=None):

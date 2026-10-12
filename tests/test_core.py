@@ -358,10 +358,17 @@ class ConstructionNotificationTests(unittest.TestCase):
         building = {"name": "Electronics Factory", "url": "https://www.simcompanies.com/b/123/"}
         product = {"name": "Batteries", "finish_at": "2020-01-01 00:00:00", "activity_type": "production"}
 
-        with patch("production_monitor.recommend_best_product", return_value=("High grade e-comps", 776.056, 343.648)), \
-             patch("production_monitor.send_telegram_notify", return_value=True) as notify:
+        with (
+            patch("production_monitor.recommend_best_product", return_value=("High grade e-comps", 776.056, 343.648)) as recommend,
+            patch("production_monitor.send_telegram_notify", return_value=True) as notify,
+        ):
             self.assertTrue(monitor._send_production_notification(building, product))
 
+        recommend.assert_called_once_with(
+            monitor.driver,
+            building["url"],
+            completed_product_name="Batteries",
+        )
         self.assertIn("建議接續生產：High grade e-comps", notify.call_args.args[0])
         self.assertIn("343.648", notify.call_args.args[0])
 
